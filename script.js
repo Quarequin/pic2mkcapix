@@ -180,6 +180,13 @@ No trace details available.</textarea>
 					</optgroup>
 				</select>
 				<hr />
+				<div id="makecode-options-group">
+					<label class="full-row">
+						<input type="checkbox" id="makecode-enable" checked /> Enable MakeCode String Output
+					</label>
+					<small id="makecode-auto-status">MakeCode output is enabled for palettes up to 15 colors.</small>
+				</div>
+				<hr />
 				<div id="ascii-options-group">
 					<label class="dropdown-label"
 						>ASCII Art Output Options:</label
@@ -288,6 +295,13 @@ No trace details available.</textarea>
 						- Remove
 					</button>
 				</div>
+			</div>
+			<div class="palette-range-controls">
+				<label for="palette-limit">Palette capacity (2–65535):</label>
+				<input type="number" id="palette-limit" class="custom" min="2" max="65535" value="15" />
+				<button type="button" id="palette-prev-btn" class="palette-slot-btn">Previous</button>
+				<button type="button" id="palette-next-btn" class="palette-slot-btn">Next</button>
+				<span id="palette-range-label">Colors 1–10</span>
 			</div>
 			<div class="colorpad" id="colorpad">
 				<div class="color-pair">
@@ -539,9 +553,9 @@ const BAYER4_U8 = _floatMatrixToU8(BAYER4_F32), BAYER8_U8 = _floatMatrixToU8(BAY
 
 let lastIndexMap = null, lastW = 0, lastH = 0, animSource = null, processedAnimation = null;
 
-const mediaFileInput = document.getElementById("file"), palettemediaFileInput = document.getElementById("palette-file-reader"), predefinedPaletteSelect = document.getElementById("predefined-palette-select"), modeSelect = document.getElementById("mode-select"), subpixelSelect = document.getElementById("subpixel-select"), engineSelect = document.getElementById("engine-select"), asciiEnableCheck = document.getElementById("ascii-enable"), asciiSubOptions = document.getElementById("ascii-sub-options"), asciiCharsetSelect = document.getElementById("ascii-charset-select"), asciiWidthInput = document.getElementById("ascii-width-input"), asciiTabBtn = document.getElementById("ascii-tab-btn"), asciiOutputTA = document.getElementById("ascii-output"), runButton = document.getElementById("run"), downloadTextButton = document.getElementById("copy"), downloadMediaButton = document.getElementById("download"), statusDiv = document.getElementById("status"), textarea = document.getElementById("output"), previewContainer = document.querySelector(".image-preview-container"), outputImage = document.getElementById("output-image"), canvas = document.getElementById("process-canvas"), ctx = canvas.getContext("2d", {
+const mediaFileInput = document.getElementById("file"), palettemediaFileInput = document.getElementById("palette-file-reader"), predefinedPaletteSelect = document.getElementById("predefined-palette-select"), modeSelect = document.getElementById("mode-select"), subpixelSelect = document.getElementById("subpixel-select"), engineSelect = document.getElementById("engine-select"), makecodeEnableCheck = document.getElementById("makecode-enable"), makecodeAutoStatus = document.getElementById("makecode-auto-status"), asciiEnableCheck = document.getElementById("ascii-enable"), asciiSubOptions = document.getElementById("ascii-sub-options"), asciiCharsetSelect = document.getElementById("ascii-charset-select"), asciiWidthInput = document.getElementById("ascii-width-input"), asciiTabBtn = document.getElementById("ascii-tab-btn"), asciiOutputTA = document.getElementById("ascii-output"), runButton = document.getElementById("run"), downloadTextButton = document.getElementById("copy"), downloadMediaButton = document.getElementById("download"), statusDiv = document.getElementById("status"), textarea = document.getElementById("output"), previewContainer = document.querySelector(".image-preview-container"), outputImage = document.getElementById("output-image"), canvas = document.getElementById("process-canvas"), ctx = canvas.getContext("2d", {
 	willReadFrequently: !0
-}), inputWidth = document.getElementById("width"), inputHeight = document.getElementById("height"), inputFactor = document.getElementById("factor"), inputRatio = document.getElementById("ratio"), parametersForm = document.getElementById("parameters"), colorpad = document.getElementById("colorpad"), paletteAddBtn = document.getElementById("palette-add-btn"), paletteRemoveBtn = document.getElementById("palette-remove-btn"), paletteCountLbl = document.getElementById("palette-count-label");
+}), inputWidth = document.getElementById("width"), inputHeight = document.getElementById("height"), inputFactor = document.getElementById("factor"), inputRatio = document.getElementById("ratio"), parametersForm = document.getElementById("parameters"), colorpad = document.getElementById("colorpad"), paletteAddBtn = document.getElementById("palette-add-btn"), paletteRemoveBtn = document.getElementById("palette-remove-btn"), paletteCountLbl = document.getElementById("palette-count-label"), paletteLimitInput = document.getElementById("palette-limit"), palettePrevBtn = document.getElementById("palette-prev-btn"), paletteNextBtn = document.getElementById("palette-next-btn"), paletteRangeLabel = document.getElementById("palette-range-label");
 
 let originalImageSize = {
 	width: 0,
@@ -656,7 +670,7 @@ function buildRowString(t, n, e, i, o, a, r) {
 }
 
 async function modeDither(t, n, e, i, o, a, r, l, c, s, u, d, h, f) {
-	const m = new Uint8Array(n * e), M = new Map, b = null !== c, g = s - 1, A = 1 / u;
+	const m = new Uint16Array(n * e), M = new Map, b = null !== c, g = s - 1, A = 1 / u;
 	let p = h ? "" : "img`\n";
 	for (let u = 0; u < e; u += 1) {
 		const S = u * n, w = (u & g) * s;
@@ -688,7 +702,7 @@ async function modeDither(t, n, e, i, o, a, r, l, c, s, u, d, h, f) {
 }
 
 async function modeFloydSteinberg(t, n, e, i, o, a, r, l, c, s) {
-	const u = new Uint8Array(n * e), d = new Float32Array(t), h = new Map;
+	const u = new Uint16Array(n * e), d = new Float32Array(t), h = new Map;
 	let f = c ? "" : "img`\n";
 	for (let t = 0; t < e; t += 1) {
 		const m = t * n;
@@ -886,7 +900,7 @@ class GLEngine {
 		c.viewport(0, 0, t, r), c.clearColor(0, 0, 0, 0), c.clear(c.COLOR_BUFFER_BIT), c.drawArrays(c.TRIANGLE_STRIP, 0, 4);
 		const l = o.data;
 		c.readPixels(0, 0, t, r, c.RGBA, c.UNSIGNED_BYTE, l);
-		const _ = new Uint8Array(t * r), E = n.length, g = CHAR_TABLE, m = a.startsWith("bayer") || a.startsWith("blue"), T = e => e < 0 ? 0 : e > 255 ? 255 : e;
+		const _ = new Uint16Array(t * r), E = n.length, g = CHAR_TABLE, m = a.startsWith("bayer") || a.startsWith("blue"), T = e => e < 0 ? 0 : e > 255 ? 255 : e;
 		let h = i ? "" : "img`\n";
 		for (let e = 0; e < r; e++) {
 			let r = "";
@@ -2130,82 +2144,265 @@ function setButtonState(e) {
 
 setButtonState("noImage");
 
-const MIN_PALETTE_SLOTS = 2, MAX_PALETTE_SLOTS = 64;
+const MIN_PALETTE_SLOTS = 2;
+const MAX_PALETTE_SLOTS = 65535;
+const VISIBLE_PALETTE_SLOTS = 20;
+const MAKECODE_PALETTE_LIMIT = 15;
+let paletteValues = [];
+let palettePageStart = 0;
+
+function lastPalettePageStart() {
+	return paletteValues.length ? Math.floor((paletteValues.length - 1) / VISIBLE_PALETTE_SLOTS) * VISIBLE_PALETTE_SLOTS : 0;
+}
+
+function paletteCapacity() {
+	const requested = Number.parseInt(paletteLimitInput.value, 10);
+	return Math.max(MIN_PALETTE_SLOTS, Math.min(MAX_PALETTE_SLOTS, Number.isFinite(requested) ? requested : MAKECODE_PALETTE_LIMIT));
+}
+
+function updateMakeCodeAvailability() {
+	const count = paletteValues.length;
+	const overLimit = count > MAKECODE_PALETTE_LIMIT;
+	if (overLimit) {
+		makecodeEnableCheck.checked = false;
+		makecodeEnableCheck.disabled = true;
+		makecodeAutoStatus.textContent = `MakeCode output was disabled automatically: ${count} palette colors exceed the 15-color limit.`;
+	} else {
+		makecodeEnableCheck.disabled = false;
+		makecodeAutoStatus.textContent = makecodeEnableCheck.checked ? `MakeCode output is enabled (${count}/15 colors).` : "MakeCode output is disabled by user.";
+	}
+}
 
 function updatePaletteCountLabel() {
-	const e = colorpad.querySelectorAll(".color-pair").length;
-	paletteCountLbl.textContent = `Active Color Registers (1–${e}):`, paletteRemoveBtn.disabled = e <= 2, 
-	paletteAddBtn.disabled = e >= 64;
+	const count = paletteValues.length;
+	const visibleEnd = Math.min(count, palettePageStart + VISIBLE_PALETTE_SLOTS);
+	paletteCountLbl.textContent = `Active Color Registers (1–${count}):`;
+	paletteRangeLabel.textContent = count ? `Colors ${palettePageStart + 1}–${visibleEnd}` : "No colors";
+	paletteRemoveBtn.disabled = count <= MIN_PALETTE_SLOTS;
+	paletteAddBtn.disabled = count >= paletteCapacity() || count >= MAX_PALETTE_SLOTS;
+	palettePrevBtn.disabled = palettePageStart <= 0;
+	paletteNextBtn.disabled = visibleEnd >= count;
+	updateMakeCodeAvailability();
 }
 
 function makeCustomPaletteLabel() {
-	predefinedPaletteSelect.querySelector('option[value="custom"]').classList.remove("hidden"), 
+	predefinedPaletteSelect.querySelector('option[value="custom"]').classList.remove("hidden");
 	predefinedPaletteSelect.value = "custom";
 }
 
-function createPalettePair(e, t = "#888888") {
-	const a = document.createElement("div");
-	a.className = "color-pair";
-	const n = document.createElement("label"), i = document.createElement("input"), o = document.createElement("input");
-	return n.textContent = `Color ${e + 1}`, i.type = "color", i.value = hexRgbOnly(t), 
-	o.type = "text", o.className = "colortext", o.value = t, a.append(n, i, o), colorpad.appendChild(a), 
-	bindColorPairEvents(a, e), a;
-}
-
-function syncPaletteSize(e) {
-	const t = Math.max(2, Math.min(64, e));
-	for (;colorpad.querySelectorAll(".color-pair").length > t; ) colorpad.lastElementChild.remove();
-	for (;colorpad.querySelectorAll(".color-pair").length < t; ) createPalettePair(colorpad.querySelectorAll(".color-pair").length);
-	reindexColorPairs();
-}
-
-function bindColorPairEvents(e, t) {
-	let a = "";
-	try {
-		a = predefinedPalettes[predefinedPaletteSelect.value][t + 1];
-	} catch {
-		a = "";
+function createPalettePair(index, value = "#888888", placeholder = false) {
+	const pair = document.createElement("div");
+	pair.className = "color-pair";
+	pair.dataset.placeholder = placeholder ? "true" : "false";
+	if (placeholder) {
+		pair.style.position = "absolute";
+		pair.style.left = "-999999px";
+		pair.style.top = "-999999px";
 	}
-	const n = e.querySelector('input[type="color"]'), i = e.querySelector(".colortext");
-	void 0 === e.dataset.alpha && (e.dataset.alpha = String(hexToRgba(i.value).a)), 
-	n.addEventListener("input", function() {
-		e.dataset.alpha = "255", i.value = this.value;
-	}), i.addEventListener("input", function() {
-		let t = this.value.trim();
-		t.startsWith("#") || (t = "#" + t), isValidHexRGB(t) && (n.value = hexRgbOnly(t), 
-		e.dataset.alpha = String(hexToRgba(t).a), this.value = t, isValidHexRGB(a) && t !== a && makeCustomPaletteLabel());
-	}), i.addEventListener("change", function() {
-		let i = this.value.trim();
-		i.startsWith("#") || (i = "#" + i), isValidHexRGB(i) ? (n.value = hexRgbOnly(i), 
-		e.dataset.alpha = String(hexToRgba(i).a), this.value = i, addToSessionLog("PALETTE", `Color slot ${t + 1} updated to ${i}`), 
-		isValidHexRGB(a) && i !== a && makeCustomPaletteLabel()) : (addToSessionLog("PALETTE_FAULT", `Invalid hex code typed: ${i}`), 
-		displayErrorPopup("Invalid Color HEX Input", `The color code "${i}" is invalid.`, "Please use Hexadecimal format such as #FFF, #FFFF, #FFFFFF or #FFFFFFFF only."), 
-		this.value = n.value);
+	const label = document.createElement("label");
+	const colorInput = document.createElement("input");
+	const textInput = document.createElement("input");
+	if (placeholder) {
+		label.textContent = " ";
+		colorInput.type = "color";
+		colorInput.disabled = true;
+		textInput.type = "text";
+		textInput.className = "colortext";
+		textInput.value = "";
+		textInput.disabled = true;
+	} else {
+		label.textContent = `Color ${index + 1}`;
+		colorInput.type = "color";
+		colorInput.value = hexRgbOnly(value);
+		textInput.type = "text";
+		textInput.className = "colortext";
+		textInput.value = value;
+	}
+	pair.append(label, colorInput, textInput);
+	colorpad.appendChild(pair);
+	if (!placeholder) bindColorPairEvents(pair, index);
+	return pair;
+}
+
+function renderPalettePage() {
+	const visibleValues = paletteValues.slice(palettePageStart, palettePageStart + VISIBLE_PALETTE_SLOTS);
+	colorpad.replaceChildren();
+	visibleValues.forEach((value, offset) => createPalettePair(palettePageStart + offset, value));
+	for (let offset = visibleValues.length; offset < VISIBLE_PALETTE_SLOTS; offset += 1) {
+		createPalettePair(palettePageStart + offset, "#888888", true);
+	}
+	updatePaletteCountLabel();
+}
+
+function setPaletteValues(values) {
+	const capacity = paletteCapacity();
+	paletteValues = values.slice(0, capacity).map(value => isValidHexRGB(value) ? value.toLowerCase() : "#888888");
+	palettePageStart = Math.min(palettePageStart, lastPalettePageStart());
+	renderPalettePage();
+}
+
+function syncPaletteSize(size) {
+	const target = Math.max(MIN_PALETTE_SLOTS, Math.min(paletteCapacity(), Number(size) || MIN_PALETTE_SLOTS));
+	while (paletteValues.length < target) paletteValues.push("#888888");
+	paletteValues.length = target;
+	renderPalettePage();
+}
+
+function updatePaletteValue(index, value) {
+	if (index < 0 || index >= paletteValues.length) return;
+	paletteValues[index] = value;
+	makeCustomPaletteLabel();
+}
+
+function bindColorPairEvents(pair, index) {
+	const colorInput = pair.querySelector('input[type="color"]');
+	const textInput = pair.querySelector(".colortext");
+	const originalValue = paletteValues[index];
+	pair.dataset.alpha = String(hexToRgba(originalValue).a);
+	colorInput.addEventListener("input", function() {
+		textInput.value = this.value;
+		pair.dataset.alpha = "255";
+		updatePaletteValue(index, this.value);
+	});
+	textInput.addEventListener("change", function() {
+		let value = this.value.trim();
+		if (!value.startsWith("#")) value = `#${value}`;
+		if (!isValidHexRGB(value)) {
+			displayErrorPopup("Invalid Color HEX Input", `The color code "${value}" is invalid.`, "Please use Hexadecimal format such as #FFF, #FFFF, #FFFFFF or #FFFFFFFF only.");
+			this.value = paletteValues[index];
+			return;
+		}
+		this.value = value;
+		colorInput.value = hexRgbOnly(value);
+		pair.dataset.alpha = String(hexToRgba(value).a);
+		updatePaletteValue(index, value);
+		addToSessionLog("PALETTE", `Color slot ${index + 1} updated to ${value}`);
 	});
 }
 
 function reindexColorPairs() {
-	colorpad.querySelectorAll(".color-pair").forEach((e, t) => {
-		e.querySelector("label").textContent = `Color ${t + 1}`;
-	}), updatePaletteCountLabel();
+	colorpad.querySelectorAll(".color-pair").forEach((pair, offset) => {
+		if (pair.dataset.placeholder === "true") {
+			pair.querySelector("label").textContent = " ";
+		} else {
+			pair.querySelector("label").textContent = `Color ${palettePageStart + offset + 1}`;
+		}
+	});
+	updatePaletteCountLabel();
 }
 
 function parseCurrentPalette() {
-	rgbPalette = [ {
-		r: 0,
-		g: 0,
-		b: 0,
-		a: 0
-	} ].concat(Array.from(colorpad.querySelectorAll(".color-pair")).map(e => {
-		const {r: t, g: a, b: n} = hexToRgba(e.querySelector('input[type="color"]').value), i = parseInt(e.dataset.alpha, 10);
-		return {
-			r: t,
-			g: a,
-			b: n,
-			a: Number.isNaN(i) ? 255 : i
-		};
+	rgbPalette = [{ r: 0, g: 0, b: 0, a: 0 }].concat(paletteValues.map(value => {
+		const color = hexToRgba(value);
+		return { r: color.r, g: color.g, b: color.b, a: color.a };
 	}));
 }
+
+paletteValues = Array.from(colorpad.querySelectorAll(".color-pair")).map(pair => pair.querySelector(".colortext").value);
+renderPalettePage();
+paletteAddBtn.addEventListener("click", function() {
+	if (paletteValues.length >= paletteCapacity()) return;
+	paletteValues.push("#888888");
+	palettePageStart = lastPalettePageStart();
+	makeCustomPaletteLabel();
+	renderPalettePage();
+	addToSessionLog("PALETTE", `Added color slot ${paletteValues.length}.`);
+});
+paletteRemoveBtn.addEventListener("click", function() {
+	if (paletteValues.length <= MIN_PALETTE_SLOTS) return;
+	paletteValues.pop();
+	palettePageStart = Math.min(palettePageStart, lastPalettePageStart());
+	makeCustomPaletteLabel();
+	renderPalettePage();
+	addToSessionLog("PALETTE", `Removed last color slot (now ${paletteValues.length} slots).`);
+});
+palettePrevBtn.addEventListener("click", function() {
+	palettePageStart = Math.max(0, palettePageStart - VISIBLE_PALETTE_SLOTS);
+	renderPalettePage();
+});
+paletteNextBtn.addEventListener("click", function() {
+	palettePageStart = Math.min(lastPalettePageStart(), palettePageStart + VISIBLE_PALETTE_SLOTS);
+	renderPalettePage();
+});
+paletteLimitInput.addEventListener("change", function() {
+	this.value = String(paletteCapacity());
+	if (paletteValues.length > paletteCapacity()) paletteValues.length = paletteCapacity();
+	palettePageStart = Math.min(palettePageStart, lastPalettePageStart());
+	renderPalettePage();
+	addToSessionLog("PALETTE", `Palette capacity set to ${paletteCapacity()} colors.`);
+});
+makecodeEnableCheck.addEventListener("change", updateMakeCodeAvailability);
+predefinedPaletteSelect.addEventListener("change", function() {
+	if (this.value === "custom" || !predefinedPalettes[this.value]) return;
+	this.querySelector('option[value="custom"]').classList.add("hidden");
+	setPaletteValues(predefinedPalettes[this.value]);
+	statusDiv.textContent = `System: Loaded predefined "${this.value}" palette schema.`;
+	addToSessionLog("PALETTE", `Switched layout to predefined scheme: ${this.value}`);
+});
+palettemediaFileInput.addEventListener("change", function(event) {
+	const file = event.target.files[0];
+	if (!file) return;
+	const reader = new FileReader();
+	reader.onerror = () => displayErrorPopup("Palette File IO Exception", "An error occurred while reading the palette source file.", reader.error ? reader.error.message : "Unknown fault.");
+	reader.onload = function(loadEvent) {
+		try {
+			const values = [];
+			loadEvent.target.result.split(/\r?\n/).forEach(line => {
+				const token = line.trim().replace(/;.*$/, "").trim();
+				const match = token.match(/#?([0-9A-Fa-f]{8})/) || token.match(/#?([0-9A-Fa-f]{6})/) || token.match(/#?([0-9A-Fa-f]{3,4})/);
+				if (match) values.push(`#${match[1].toLowerCase()}`);
+			});
+			if (!values.length) throw new Error("No valid Hexadecimal color codes found in this file.");
+			setPaletteValues(values);
+			makeCustomPaletteLabel();
+			statusDiv.textContent = `System: Loaded ${Math.min(values.length, paletteCapacity())} of ${values.length} colors from palette file.`;
+			addToSessionLog("PALETTE", `Imported external palette from ${file.name}.`);
+		} catch (error) {
+			displayErrorPopup("Palette Processor Runtime Fault", error.message, error.stack);
+		}
+	};
+	reader.readAsText(file);
+});
+
+mediaFileInput.addEventListener("change", async function() {
+	resetLoadedState();
+	const e = mediaFileInput.files[0];
+	if (!e) return void (statusDiv.textContent = "Invalid: No image file. Try selecting an image such as PNG, JPG, GIF, APNG, WebP, or WebM.");
+	const t = sourceMime(e);
+	if (/^image\//.test(t) || "video/webm" === t) {
+		statusDiv.textContent = `System: Loading asset of "${e.name}".`, originalMimeType = t, 
+		sourceExtension = sourceExtensionOf(e), uploadedFileBuffer = await e.arrayBuffer();
+		try {
+			if ("video/webm" === t || isAnimatedBuffer(uploadedFileBuffer, t)) {
+				const a = await decodeAnimation(uploadedFileBuffer, t), n = await inspectAnimationSource(a);
+				if (!n.first) throw new Error("No decodable animation frames were found.");
+				const i = createOriginalReviewElement(e), o = n.frameCount || a.frameCount || 0;
+				n.visuallyStatic ? (animSource = null, showLoadedPreview(i, n.first.width, n.first.height), 
+				uploadedFileBuffer = null, statusDiv.textContent = `Ready: "${e.name}" Loaded as a static image.`, 
+				addToSessionLog("IMAGE", `Loaded "${t}" as static output (${o || 1} visually identical frame(s)).`)) : (animSource = a, 
+				showLoadedPreview(i, n.first.width, n.first.height, o), statusDiv.textContent = `Ready: "${e.name}" Loaded (${o ? `${o} ` : ""}frame${1 === o ? "" : "s"}).`, 
+				addToSessionLog("ANIM", `Loaded "${t}" as a streaming animation source${o ? ` with ${o} frame(s)` : ""}.`)), 
+				releaseFrame(n.first);
+			} else {
+				const a = createOriginalReviewElement(e);
+				const onLoaded = () => {
+					const width = a.videoWidth || a.naturalWidth;
+					const height = a.videoHeight || a.naturalHeight;
+					showLoadedPreview(a, width, height);
+					statusDiv.textContent = `Ready: "${e.name}" Loaded Successfully.`;
+					addToSessionLog("IMAGE", `Loaded "${t}" source image.`);
+				};
+				a.addEventListener("loadedmetadata", onLoaded, { once: true });
+				a.addEventListener("load", onLoaded, { once: true });
+				a.addEventListener("error", () => {
+					displayErrorPopup("Image Decoding Exception", "Unable to decode this image file.", "The file may be corrupted or unsupported.");
+				}, { once: true });
+			}
+		} catch (e) {
+			displayErrorPopup("Animation Decode Error", e.message, e.stack), resetLoadedState();
+		}
+	} else statusDiv.textContent = `Invalid: "${e.name}" is not a supported image or WebM file.`;
+});
 
 function revokeOutputObjectUrl() {
 	outputObjectUrl && URL.revokeObjectURL(outputObjectUrl), outputObjectUrl = null;
@@ -2235,6 +2432,7 @@ function resetLoadedState() {
 	animSource = null;
 	processedAnimation = null;
 	outputBlob = null;
+	indexedOutputPalette = null;
 	revokeOutputObjectUrl();
 	if (outputImage) {
 		outputImage.removeAttribute("src");
@@ -2355,86 +2553,6 @@ function canvasToBlob(e, t = "image/png", a) {
 	});
 }
 
-colorpad.querySelectorAll(".color-pair").forEach((e, t) => {
-	bindColorPairEvents(e, t);
-}), updatePaletteCountLabel(), paletteAddBtn.addEventListener("click", function() {
-	const e = colorpad.querySelectorAll(".color-pair").length;
-	e >= 64 || (createPalettePair(e), reindexColorPairs(), makeCustomPaletteLabel(), 
-	addToSessionLog("PALETTE", `Added color slot ${e + 1}.`));
-}), paletteRemoveBtn.addEventListener("click", function() {
-	const e = colorpad.querySelectorAll(".color-pair");
-	e.length <= 2 || (colorpad.removeChild(e[e.length - 1]), reindexColorPairs(), makeCustomPaletteLabel(), 
-	addToSessionLog("PALETTE", `Removed last color slot (now ${e.length - 1} slots).`));
-}), predefinedPaletteSelect.addEventListener("change", function() {
-	if ("custom" === this.value || !predefinedPalettes[this.value]) return;
-	this.querySelector('option[value="custom"]').classList.add("hidden");
-	const e = predefinedPalettes[this.value];
-	e && (syncPaletteSize(e.length), colorpad.querySelectorAll(".color-pair").forEach((t, a) => {
-		e[a] && (t.querySelector('input[type="color"]').value = hexRgbOnly(e[a]), t.querySelector(".colortext").value = e[a], 
-		t.dataset.alpha = String(hexToRgba(e[a]).a));
-	}), reindexColorPairs(), statusDiv.textContent = `System: Loaded predefined "${this.value}" palette schema.`, 
-	addToSessionLog("PALETTE", `Switched layout to predefined scheme: ${this.value}`));
-}), palettemediaFileInput.addEventListener("change", function(e) {
-	const t = e.target.files[0];
-	if (!t) return;
-	const a = new FileReader;
-	a.onerror = () => displayErrorPopup("Palette File IO Exception", "An error occurred while reading the palette source file.", a.error ? a.error.message : "Unknown fault."), 
-	a.onload = function(e) {
-		try {
-			const a = [];
-			e.target.result.split(/\r?\n/).forEach(e => {
-				const t = e.trim().replace(/;.*$/, "").trim(), n = t.match(/#?([0-9A-Fa-f]{8})/) || t.match(/#?([0-9A-Fa-f]{6})/) || t.match(/#?([0-9A-Fa-f]{3,4})/);
-				n && a.push("#" + n[1].toLowerCase());
-			}), a.length > 0 ? (syncPaletteSize(a.length), colorpad.querySelectorAll(".color-pair").forEach((e, t) => {
-				a[t] && (e.querySelector('input[type="color"]').value = hexRgbOnly(a[t]), e.querySelector(".colortext").value = a[t], 
-				e.dataset.alpha = String(hexToRgba(a[t]).a));
-			}), reindexColorPairs(), statusDiv.textContent = `System: Loaded ${a.length} colors from palette file.`, 
-			addToSessionLog("PALETTE", `Imported external palette from ${t.name}.`)) : displayErrorPopup("Palette Parsing Exception", "No valid Hexadecimal color codes found in this file.", "Please verify the file contents."), 
-			makeCustomPaletteLabel();
-		} catch (e) {
-			displayErrorPopup("Palette Processor Runtime Fault", e.message, e.stack);
-		}
-	}, a.readAsText(t);
-}), mediaFileInput.addEventListener("change", async function() {
-	resetLoadedState();
-	const e = mediaFileInput.files[0];
-	if (!e) return void (statusDiv.textContent = "Invalid: No image file. Try selecting an image such as PNG, JPG, GIF, APNG, WebP, or WebM.");
-	const t = sourceMime(e);
-	if (/^image\//.test(t) || "video/webm" === t) {
-		statusDiv.textContent = `System: Loading asset of "${e.name}".`, originalMimeType = t, 
-		sourceExtension = sourceExtensionOf(e), uploadedFileBuffer = await e.arrayBuffer();
-		try {
-			if ("video/webm" === t || isAnimatedBuffer(uploadedFileBuffer, t)) {
-				const a = await decodeAnimation(uploadedFileBuffer, t), n = await inspectAnimationSource(a);
-				if (!n.first) throw new Error("No decodable animation frames were found.");
-				const i = createOriginalReviewElement(e), o = n.frameCount || a.frameCount || 0;
-				n.visuallyStatic ? (animSource = null, showLoadedPreview(i, n.first.width, n.first.height), 
-				uploadedFileBuffer = null, statusDiv.textContent = `Ready: "${e.name}" Loaded as a static image.`, 
-				addToSessionLog("IMAGE", `Loaded "${t}" as static output (${o || 1} visually identical frame(s)).`)) : (animSource = a, 
-				showLoadedPreview(i, n.first.width, n.first.height, o), statusDiv.textContent = `Ready: "${e.name}" Loaded (${o ? `${o} ` : ""}frame${1 === o ? "" : "s"}).`, 
-				addToSessionLog("ANIM", `Loaded "${t}" as a streaming animation source${o ? ` with ${o} frame(s)` : ""}.`)), 
-				releaseFrame(n.first);
-			} else {
-				const a = createOriginalReviewElement(e);
-				const onLoaded = () => {
-					const width = a.videoWidth || a.naturalWidth;
-					const height = a.videoHeight || a.naturalHeight;
-					showLoadedPreview(a, width, height);
-					statusDiv.textContent = `Ready: "${e.name}" Loaded Successfully.`;
-					addToSessionLog("IMAGE", `Loaded "${t}" source image.`);
-				};
-				a.addEventListener("loadedmetadata", onLoaded, { once: true });
-				a.addEventListener("load", onLoaded, { once: true });
-				a.addEventListener("error", () => {
-					displayErrorPopup("Image Decoding Exception", "Unable to decode this image file.", "The file may be corrupted or unsupported.");
-				}, { once: true });
-			}
-		} catch (e) {
-			displayErrorPopup("Animation Decode Error", e.message, e.stack), resetLoadedState();
-		}
-	} else statusDiv.textContent = `Invalid: "${e.name}" is not a supported image or WebM file.`;
-});
-
 const OUTPUT_MIME_TYPES = Object.freeze({
 	png: "image/png",
 	jpg: "image/jpeg",
@@ -2456,12 +2574,14 @@ function assertBlobType(e, t, a) {
 }
 
 async function encodeStaticOutput(e, t, a) {
+	const indexedMap = prepareIndexedOutput(e.indexMap);
+	const indexedInput = { ...e, indexMap: indexedMap };
 	if ("jxl" === sourceExtension || "webm" === sourceExtension) throw new Error(`This browser cannot encode processed ${sourceExtension.toUpperCase()} output without changing the requested extension.`);
 	if ("gif" === sourceExtension) return encodeAnimatedGif({
 		width: t,
 		height: a,
 		frames: [ {
-			indexMap: e.indexMap,
+			indexMap: indexedInput.indexMap,
 			width: t,
 			height: a,
 			rect: {
@@ -2484,7 +2604,7 @@ async function encodeStaticOutput(e, t, a) {
 			repeat: null
 		});
 		return n.add({
-			indexMap: e.indexMap,
+			indexMap: indexedInput.indexMap,
 			rect: {
 				x: 0,
 				y: 0,
@@ -2578,70 +2698,71 @@ async function yieldOutputFrame() {
 	});
 }
 
-function createProcessedTextOutput(e, t, a, n) {
-	const i = createStringOutputWriter("makecode");
-	const o = createStringOutputWriter("ascii");
-	const r = createAsciiRowStream(e, t, o, a, n);
-	let s = 0;
+function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled, asciiWidth) {
+	const makecodeWriter = makecodeEnabled ? createStringOutputWriter("makecode") : null;
+	const asciiWriter = createStringOutputWriter("ascii");
+	const asciiRows = createAsciiRowStream(width, height, asciiWriter, asciiEnabled, asciiWidth);
+	let rowsSinceRender = 0;
 	const startFollowTail = () => {
 		getOutputState("makecode").followTail = true;
 		getOutputState("ascii").followTail = true;
 	};
 	return {
 		startStatic() {
-			i.reset();
-			o.reset();
-			i.appendLine("img`");
-			r.beginFrame();
-			s = 0;
+			makecodeWriter?.reset();
+			asciiWriter.reset();
+			makecodeWriter?.appendLine("img`");
+			asciiRows.beginFrame();
+			rowsSinceRender = 0;
 			startFollowTail();
 			renderOutputViewports();
 		},
 		startAnimation() {
-			i.reset("[");
-			o.reset();
-			s = 0;
+			makecodeWriter?.reset("[");
+			asciiWriter.reset();
+			rowsSinceRender = 0;
 			startFollowTail();
 			renderOutputViewports();
 		},
-		beginFrame(e, t) {
-			if (e > 1) {
-				i.appendLine(",");
-				a && o.appendLine("");
+		beginFrame(frameNumber, frameTotal) {
+			if (frameNumber > 1) {
+				makecodeWriter?.appendLine(",");
+				asciiEnabled && asciiWriter.appendLine("");
 			}
-			i.appendLine("img`");
-			r.beginFrame(`Frame ${e}${t ? `/${t}` : ""}:`);
-			s = 0;
+			makecodeWriter?.appendLine("img`");
+			asciiRows.beginFrame(`Frame ${frameNumber}${frameTotal ? `/${frameTotal}` : ""}:`);
+			rowsSinceRender = 0;
 			renderOutputViewports();
 		},
-		async onRow(e, t, a) {
-			i.appendLine(t);
-			r.onSourceRow(e, a);
-			s += 1;
-			if (s >= 16) {
-				s = 0;
+		async onRow(row, line, sourceRow) {
+			makecodeWriter?.appendLine(line);
+			asciiRows.onSourceRow(row, sourceRow);
+			rowsSinceRender += 1;
+			if (rowsSinceRender >= 16) {
+				rowsSinceRender = 0;
 				renderOutputViewports();
 				await yieldOutputFrame();
 			}
 		},
 		finishStatic() {
-			i.appendLine("`");
-			r.finish();
+			makecodeWriter?.appendLine("`");
+			asciiRows.finish();
 			finishOutputViewports();
 		},
 		finishFrame() {
-			i.appendLine("`");
-			r.finish();
+			makecodeWriter?.appendLine("`");
+			asciiRows.finish();
 			renderOutputViewports();
 		},
 		finishAnimation() {
-			i.appendLine("]");
+			makecodeWriter?.appendLine("]");
 			finishOutputViewports();
 		}
 	};
 }
 
 async function processAnimation(e, t) {
+	indexedOutputPalette = null;
 	const a = animSource, n = await a.open();
 	if (!n) throw new Error("Unable to open animation frame stream.");
 	const i = a.repeat ?? n.repeat ?? null, o = a.frameCount || n.frameCount || 0, r = createAnimatedOutputWriter(sourceExtension, {
@@ -2649,7 +2770,7 @@ async function processAnimation(e, t) {
 		height: t,
 		repeat: i,
 		frameCount: o
-	}), s = engineSelect.value, l = parseInt(asciiWidthInput.value) || 80, c = createProcessedTextOutput(e, t, asciiEnableCheck.checked, l);
+	}), s = engineSelect.value, l = parseInt(asciiWidthInput.value) || 80, c = createProcessedTextOutput(e, t, makecodeEnableCheck.checked, asciiEnableCheck.checked, l);
 	c.startAnimation();
 	let u = null, d = 0;
 	for await (const a of n) {
@@ -2670,7 +2791,7 @@ async function processAnimation(e, t) {
 				runButton.textContent = `Converting frame ${n}${i}: ${e}%`, statusDiv.textContent = `Processing frame ${n}${i}: ${e}%`, 
 				await yieldOutputFrame();
 			}
-		}) : await runCPUPipelineFallback(l, e, t, p, `Processing frame ${n}${i}`, `Converting frame ${n}${i}`, h, g), f = m.indexMap instanceof Uint8Array ? m.indexMap : new Uint8Array(m.indexMap), w = makeOutputDelta(f, u, e, t, a);
+		}) : await runCPUPipelineFallback(l, e, t, p, `Processing frame ${n}${i}`, `Converting frame ${n}${i}`, h, g), f = m.indexMap instanceof Uint16Array ? m.indexMap : new Uint16Array(m.indexMap), w = makeOutputDelta(f, u, e, t, a);
 		u = f, ctx.putImageData(p, 0, 0), await r.add({
 			...w,
 			delay: a.delay,
@@ -2719,7 +2840,7 @@ function makeOutputDelta(e, t, a, n, i) {
 	}
 	g || (u = Math.max(0, Math.min(a - 1, Math.floor(s.x * l))), d = Math.max(0, Math.min(n - 1, Math.floor(s.y * c))), 
 	p = u + 1, h = d + 1);
-	const m = new Uint8Array(Math.max(1, p - u) * Math.max(1, h - d));
+	const m = new Uint16Array(Math.max(1, p - u) * Math.max(1, h - d));
 	let f = 0;
 	for (let n = d; n < h; n += 1) for (let i = u; i < p; i += 1) {
 		const o = n * a + i;
@@ -2763,14 +2884,28 @@ async function runCPUPipelineFallback(e, t, a, n, i, j, o = imageDataHasAlpha(e.
 	});
 }
 
+let indexedOutputPalette = null;
+
 function paletteForOutput() {
-	const e = rgbPalette.slice(0, 256);
-	return e.length && 0 === e[0].a || e.unshift({
-		r: 0,
-		g: 0,
-		b: 0,
-		a: 0
-	}), e;
+	if (indexedOutputPalette) {
+		return indexedOutputPalette.map(index => rgbPalette[index] || { r: 0, g: 0, b: 0, a: 0 });
+	}
+	const palette = rgbPalette.slice(0, 256);
+	return palette.length && palette[0].a === 0 || palette.unshift({ r: 0, g: 0, b: 0, a: 0 }), palette;
+}
+
+function prepareIndexedOutput(indexMap) {
+	const used = new Set([0]);
+	for (const index of indexMap) used.add(index);
+	const sourceIndices = Array.from(used).filter(index => index < rgbPalette.length).slice(0, 256);
+	const remap = new Uint8Array(indexMap.length);
+	const map = new Map(sourceIndices.map((index, outputIndex) => [index, outputIndex]));
+	for (let index = 0; index < indexMap.length; index += 1) {
+		const sourceIndex = indexMap[index];
+		remap[index] = map.get(sourceIndex) ?? 0;
+	}
+	indexedOutputPalette = sourceIndices;
+	return remap;
 }
 
 function createAnimatedOutputWriter(e, t) {
@@ -2817,7 +2952,7 @@ document.querySelectorAll('input[name="resize"], #factor').forEach(e => {
 			ctx.globalCompositeOperation = "source-over";
 			const n = ctx.getImageData(0, 0, t, a);
 			ctx.clearRect(0, 0, t, a);
-			const i = ctx.createImageData(t, a), o = engineSelect.value, r = parseInt(asciiWidthInput.value) || 80, s = createProcessedTextOutput(t, a, asciiEnableCheck.checked, r);
+			const i = ctx.createImageData(t, a), o = engineSelect.value, r = parseInt(asciiWidthInput.value) || 80, s = createProcessedTextOutput(t, a, makecodeEnableCheck.checked, asciiEnableCheck.checked, r);
 			let l;
 			s.startStatic();
 			const c = imageDataHasAlpha(n.data);

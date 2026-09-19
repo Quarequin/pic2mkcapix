@@ -898,3 +898,30 @@ input[type="file"] {
 	background-color: var(--bg-color);
 	color: var(--text-color);
 }
+
+
+/* Palette capacity and ten-row pager. Existing palette layout is preserved. */
+.palette-range-controls {
+	display: block;
+	margin: 0 0 8px 0;
+	padding: 6px;
+	background: var(--panel-bg);
+}
+.palette-range-controls label,
+.palette-range-controls input,
+.palette-range-controls button,
+.palette-range-controls span {
+	display: inline-block;
+	margin: 2px 4px 2px 0;
+}
+.palette-range-controls input {
+	width: 90px;
+}
+.palette-range-controls span {
+	color: var(--accent-color);
+}
+#makecode-auto-status {
+	display: block;
+	margin: 4px 0 0 22px;
+	color: var(--accent-color);
+}
