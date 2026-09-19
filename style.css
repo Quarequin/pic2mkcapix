@@ -900,7 +900,7 @@ input[type="file"] {
 }
 
 
-/* Palette capacity and ten-row pager. Existing palette layout is preserved. */
+/* Palette capacity and twenty-row pager. Existing palette layout is preserved. */
 .palette-range-controls {
 	display: block;
 	margin: 0 0 8px 0;

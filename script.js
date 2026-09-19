@@ -579,6 +579,10 @@ const predefinedPalettes = {
 //script/engine/matrix/cpu.js
 const clamp = t => t < 0 ? 0 : t > 255 ? 255 : t, COLOR_CACHE_LIMIT = 4096;
 
+function createIndexMap(length) {
+	return rgbPalette.length <= 256 ? new Uint8Array(length) : new Uint16Array(length);
+}
+
 function findNearestColor(t, n, e, i) {
 	let o = 1 / 0, a = 1;
 	for (let r = 1; r < i.length; r += 1) {
@@ -670,7 +674,7 @@ function buildRowString(t, n, e, i, o, a, r) {
 }
 
 async function modeDither(t, n, e, i, o, a, r, l, c, s, u, d, h, f) {
-	const m = new Uint16Array(n * e), M = new Map, b = null !== c, g = s - 1, A = 1 / u;
+	const m = createIndexMap(n * e), M = new Map, b = null !== c, g = s - 1, A = 1 / u;
 	let p = h ? "" : "img`\n";
 	for (let u = 0; u < e; u += 1) {
 		const S = u * n, w = (u & g) * s;
@@ -702,7 +706,7 @@ async function modeDither(t, n, e, i, o, a, r, l, c, s, u, d, h, f) {
 }
 
 async function modeFloydSteinberg(t, n, e, i, o, a, r, l, c, s) {
-	const u = new Uint16Array(n * e), d = new Float32Array(t), h = new Map;
+	const u = createIndexMap(n * e), d = new Float32Array(t), h = new Map;
 	let f = c ? "" : "img`\n";
 	for (let t = 0; t < e; t += 1) {
 		const m = t * n;
@@ -900,7 +904,7 @@ class GLEngine {
 		c.viewport(0, 0, t, r), c.clearColor(0, 0, 0, 0), c.clear(c.COLOR_BUFFER_BIT), c.drawArrays(c.TRIANGLE_STRIP, 0, 4);
 		const l = o.data;
 		c.readPixels(0, 0, t, r, c.RGBA, c.UNSIGNED_BYTE, l);
-		const _ = new Uint16Array(t * r), E = n.length, g = CHAR_TABLE, m = a.startsWith("bayer") || a.startsWith("blue"), T = e => e < 0 ? 0 : e > 255 ? 255 : e;
+		const _ = createIndexMap(t * r), E = n.length, g = CHAR_TABLE, m = a.startsWith("bayer") || a.startsWith("blue"), T = e => e < 0 ? 0 : e > 255 ? 255 : e;
 		let h = i ? "" : "img`\n";
 		for (let e = 0; e < r; e++) {
 			let r = "";
@@ -2298,6 +2302,52 @@ function parseCurrentPalette() {
 	}));
 }
 
+let temporaryPaletteIndices = null;
+
+function temporaryPaletteLimit() {
+	return sourceExtension === "gif" || sourceExtension === "apng" || sourceExtension === "png" && animSource ? 256 : 65535;
+}
+
+function finalizeTemporaryPalette(mainPalette, usedMainIndices) {
+	const selected = Array.from(usedMainIndices).sort((left, right) => left - right);
+	const limit = temporaryPaletteLimit();
+	if (selected.length > limit) selected.length = limit;
+	if (!selected.includes(0)) selected.unshift(0);
+	temporaryPaletteIndices = selected;
+	rgbPalette = temporaryPaletteIndices.map(mainIndex => mainPalette[mainIndex]);
+}
+
+function selectTemporaryPaletteFromPixels(data) {
+	const mainPalette = rgbPalette;
+	const usedMainIndices = new Set([0]);
+	const cache = new Map();
+	for (let offset = 0; offset < data.length; offset += 4) {
+		if (data[offset + 3] >= 128) usedMainIndices.add(cachedFindNearest(data[offset], data[offset + 1], data[offset + 2], mainPalette, cache));
+	}
+	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+}
+
+async function selectTemporaryPaletteFromAnimation(source, width, height) {
+	const stream = await source.open();
+	if (!stream) throw new Error("Unable to open animation while preparing its temporary palette.");
+	const usedMainIndices = new Set([0]);
+	const mainPalette = rgbPalette;
+	const cache = new Map();
+	for await (const frame of stream) {
+		ctx.globalCompositeOperation = "copy";
+		ctx.clearRect(0, 0, width, height);
+		ctx.drawImage(frame.image, 0, 0, width, height);
+		ctx.globalCompositeOperation = "source-over";
+		const pixels = ctx.getImageData(0, 0, width, height).data;
+		for (let offset = 0; offset < pixels.length; offset += 4) {
+			if (pixels[offset + 3] >= 128) usedMainIndices.add(cachedFindNearest(pixels[offset], pixels[offset + 1], pixels[offset + 2], mainPalette, cache));
+		}
+		releaseFrame(frame);
+		await yieldOutputFrame();
+	}
+	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+}
+
 paletteValues = Array.from(colorpad.querySelectorAll(".color-pair")).map(pair => pair.querySelector(".colortext").value);
 renderPalettePage();
 paletteAddBtn.addEventListener("click", function() {
@@ -2423,6 +2473,7 @@ function revokeOriginalPreviewObjectUrl() {
 
 function resetLoadedState() {
 	revokeOriginalPreviewObjectUrl();
+	temporaryPaletteIndices = null;
 	resetOutputString("makecode");
 	resetOutputString("ascii");
 	makecodeStringOutput = "";
@@ -2763,6 +2814,7 @@ function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled,
 
 async function processAnimation(e, t) {
 	indexedOutputPalette = null;
+	await selectTemporaryPaletteFromAnimation(animSource, e, t);
 	const a = animSource, n = await a.open();
 	if (!n) throw new Error("Unable to open animation frame stream.");
 	const i = a.repeat ?? n.repeat ?? null, o = a.frameCount || n.frameCount || 0, r = createAnimatedOutputWriter(sourceExtension, {
@@ -2791,7 +2843,7 @@ async function processAnimation(e, t) {
 				runButton.textContent = `Converting frame ${n}${i}: ${e}%`, statusDiv.textContent = `Processing frame ${n}${i}: ${e}%`, 
 				await yieldOutputFrame();
 			}
-		}) : await runCPUPipelineFallback(l, e, t, p, `Processing frame ${n}${i}`, `Converting frame ${n}${i}`, h, g), f = m.indexMap instanceof Uint16Array ? m.indexMap : new Uint16Array(m.indexMap), w = makeOutputDelta(f, u, e, t, a);
+		}) : await runCPUPipelineFallback(l, e, t, p, `Processing frame ${n}${i}`, `Converting frame ${n}${i}`, h, g), f = m.indexMap instanceof Uint8Array || m.indexMap instanceof Uint16Array ? m.indexMap : createIndexMap(m.indexMap.length), w = makeOutputDelta(f, u, e, t, a);
 		u = f, ctx.putImageData(p, 0, 0), await r.add({
 			...w,
 			delay: a.delay,
@@ -2840,7 +2892,7 @@ function makeOutputDelta(e, t, a, n, i) {
 	}
 	g || (u = Math.max(0, Math.min(a - 1, Math.floor(s.x * l))), d = Math.max(0, Math.min(n - 1, Math.floor(s.y * c))), 
 	p = u + 1, h = d + 1);
-	const m = new Uint16Array(Math.max(1, p - u) * Math.max(1, h - d));
+	const m = createIndexMap(Math.max(1, p - u) * Math.max(1, h - d));
 	let f = 0;
 	for (let n = d; n < h; n += 1) for (let i = u; i < p; i += 1) {
 		const o = n * a + i;
@@ -2942,6 +2994,7 @@ document.querySelectorAll('input[name="resize"], #factor').forEach(e => {
 			isProcessing = true;
 			stopTextProcessingFlag = false;
 			canvasName = `${fileStem()}.${sourceExtension}`, processedAnimation = null, parseCurrentPalette();
+			temporaryPaletteIndices = null;
 			const t = parseInt(inputWidth.value) || 16, a = parseInt(inputHeight.value) || 16;
 			if (Math.sqrt(a + t), canvas.width = t, canvas.height = a, setButtonState("processing"), 
 			runButton.textContent = "Converting...",
@@ -2952,6 +3005,7 @@ document.querySelectorAll('input[name="resize"], #factor').forEach(e => {
 			ctx.globalCompositeOperation = "source-over";
 			const n = ctx.getImageData(0, 0, t, a);
 			ctx.clearRect(0, 0, t, a);
+			selectTemporaryPaletteFromPixels(n.data);
 			const i = ctx.createImageData(t, a), o = engineSelect.value, r = parseInt(asciiWidthInput.value) || 80, s = createProcessedTextOutput(t, a, makecodeEnableCheck.checked, asciiEnableCheck.checked, r);
 			let l;
 			s.startStatic();

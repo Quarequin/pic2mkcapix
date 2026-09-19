@@ -28,6 +28,6 @@ Animated GIF, APNG, WebP, and WebM sources are decoded into composited frames. F
 
 This release adds an optional MakeCode string-output switch and a palette manager designed for large custom palettes. MakeCode output turns off automatically when the active palette contains more than 15 colors and becomes available again at 15 colors or fewer.
 
-The palette capacity can be set from 2 through 65,535 colors. Only ten palette rows are mounted in the DOM at a time; Previous and Next navigate through the remaining ranges. Imported palettes are capped by the selected capacity. Indexed GIF/APNG output remaps its index table to colors that are actually used by the processed result, subject to the formats’ 256-color limit.
+The palette capacity can be set from 2 through 65,536 colors. Only twenty palette rows are mounted in the DOM at a time; Previous and Next navigate through the remaining ranges. Imported palettes are capped by the selected capacity. Indexed GIF/APNG output remaps its index table to colors that are actually used by the processed result, subject to the formats’ 256-color limit.
 
 JavaScript remains readable and uses tabs for indentation. The original CSS layout is preserved; only additive rules for the new controls were added.
