@@ -11,7 +11,7 @@ download source at [here](https://github.com/Quarequin/pic2mkcapix/raw/refs/head
 
 <dl>
 <dt>note for anti-ai user:</dt>
-<dd>this project use <i>ai</i> to make project but you can fork this to make as human code sorry. :(</dd>
+<dd>this project use <i>ai</i> to make project but you can fork this to make clean-code-reverse-engineer as human code(if possible) sorry. :(</dd>
 <dl>
 
 ---
