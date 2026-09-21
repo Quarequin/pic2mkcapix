@@ -18,11 +18,10 @@ document.querySelector("body").insertAdjacentHTML("beforeend", `
 	<dl>
 		<dt>note for makecode arcade user:</dt>
 		<dd>15 palette colors for <i>makecode arcade</i> compatibility.</dd>
-		<dt>note for anti-ai user:</dt>
-		<dd>
-			this page use <i>ai</i> to make project but you can fork this to
-			make as human code sorry.
-		</dd>
+		<dl>
+			<dt>note for anti-ai user:</dt>
+			<dd>this project use <i>ai</i> to make project but you can fork this to make clean-code-reverse-engineer as human code(if possible) sorry. :(</dd>
+		<dl>
 	</dl>
 	<div id="notification-popup-overlay">
 		<div class="popup-error-card">
