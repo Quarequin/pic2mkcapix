@@ -92,16 +92,28 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	display: inline-block;
 }
 
-.loader-spinner {
-	width: 50px;
-	height: 50px;
-	border: 4px double var(--border-color);
-	border-top: 4px solid var(--accent-color);
-	border-bottom: 4px solid var(--accent-color);
-	border-radius: 50%;
-	animation: spin 1s linear infinite;
+.loader-progress {
+	appearance: none;
+	-webkit-appearance: none;
+	display: block;
+	width: min(360px, 80vw);
+	height: 18px;
 	margin: 0 auto 20px auto;
-	display: inline-block;
+	border: 2px solid var(--border-color);
+	background-color: var(--bg-color);
+	color: var(--accent-color);
+}
+
+.loader-progress::-webkit-progress-bar {
+	background-color: var(--bg-color);
+}
+
+.loader-progress::-webkit-progress-value {
+	background-color: var(--accent-color);
+}
+
+.loader-progress::-moz-progress-bar {
+	background-color: var(--accent-color);
 }
 
 .loader-text {
@@ -119,18 +131,12 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	display: block;
 }
 
-@keyframes spin {
-	0% { transform: rotate(0deg); }
-	100% { transform: rotate(360deg); }
-}
-
 #parameters {
 	border: 3px double var(--terminal-green);
 	background: var(--bg-color);
 	color: var(--text-color);
 	margin: 5px 0;
 	padding: 7.5px;
-	border-radius: 1em 1em 1.72em 1.72em;
 	display: block;
 }
 
@@ -159,7 +165,6 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 .size-settings-grid {
 	background: var(--panel-bg);
 	padding: 7px;
-	border-radius: 6px;
 	border: 1px solid var(--border-color);
 	margin-bottom: 15px;
 	display: block;
@@ -207,7 +212,6 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 .dropdown-selection-group {
 	padding: 12px;
 	border: 1px dashed var(--border-color);
-	border-radius: 0.5em;
 	clear: both;
 	margin-top: 15px;
 	background: var(--panel-bg);
@@ -227,7 +231,6 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	background-color: var(--bg-color);
 	color: var(--text-color);
 	border: 1px solid var(--border-color);
-	border-radius: 0.3em;
 	padding: 8px;
 	font-family: var(--main-font);
 	font-size: 13px;
@@ -269,7 +272,6 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	color: var(--text-color);
 	background-color: var(--bg-color);
 	border: 1px solid var(--border-color);
-	border-radius: 1em;
 	padding: 12px 8px;
 	cursor: pointer;
 	font-size: 13px;
@@ -321,13 +323,11 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	margin: 2px 0.375%;
 	background: var(--panel-bg);
 	padding: 6px;
-	border-radius: 4px;
 	border: 1px solid var(--border-color);
 }
 
 .colorboard .colorpad .color-pair input[type="color"] {
 	padding: 0px;
-	border-radius: 0.3em;
 	width: 1.3em;
 	margin: 0;
 	margin-right: 5px;
@@ -365,7 +365,6 @@ input {
 	color: var(--text-color);
 	border-style: none;
 	border-bottom-style: solid;
-	/*border-radius: 0.3em;*/
 	padding: 2.5px;
 	font-family: var(--main-font);
 }
@@ -373,7 +372,6 @@ input {
 div.tab-panel textarea {
 	clear: both;
 	display: block;
-	border-radius: 0.0em 0.0em 0.8em 0.8em;
 	background-color: var(--panel-bg);
 	color: var(--terminal-green);
 	width: 100%;
@@ -392,7 +390,6 @@ div.tab-panel textarea {
 	background-color: var(--status-bg);
 	color: var(--status-text);
 	padding: 5px;
-	border-radius: 0.3em;
 	display: inline-block;
 	font-weight: bold;
 	position: sticky;
@@ -419,7 +416,6 @@ div.tab-panel textarea {
 	margin-right: 2%;
 	background: var(--panel-bg);
 	border: 1px dashed var(--accent-color);
-	border-radius: 8px;
 	padding: 12px;
 }
 
@@ -456,7 +452,6 @@ div.tab-panel textarea {
 	background-size: 10px 10px;
 	background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
 	background-color: #151515;
-	border-radius: 4px;
 	padding: 5px;
 	margin: 0 auto;
 	display: block;
@@ -467,7 +462,6 @@ div.tab-panel textarea {
 	color: var(--accent-color);
 	background: var(--bg-color);
 	padding: 4px 8px;
-	border-radius: 4px;
 	margin-bottom: 8px;
 	border: 1px solid var(--border-color);
 	font-family: var(--main-mono-font);
@@ -483,12 +477,6 @@ div.output {
 	text-align: center;
 }
 
-body > img:not(.show) {
-	position: absolute;
-	right: -10000%;
-	top: -10000%;
-}
-
 #info {
 	background-color: var(--bg-color);
 	border: 1px solid var(--terminal-green);
@@ -496,7 +484,6 @@ body > img:not(.show) {
 	margin-top: -0.5em;
 	margin-bottom: 1em;
 	padding: 15px;
-	border-radius: 1.5em;
 	display: block;
 }
 
@@ -514,7 +501,6 @@ input[type="file"] {
 	padding: 0.8em;
 	border: 1px dashed var(--accent-color);
 	display: block;
-	border-radius: 0.3em;
 	margin-bottom: 15px;
 	width: 100%;
 }
@@ -523,7 +509,6 @@ input[type="file"] {
 	margin-bottom: 15px;
 	background: var(--panel-bg);
 	padding: 10px;
-	border-radius: 6px;
 	border: 1px solid var(--border-color);
 	display: block;
 }
@@ -562,7 +547,6 @@ input[type="file"] {
 	background: var(--panel-bg);
 	color: var(--accent-color);
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
 	width: 90%;
 	max-width: 550px;
 	box-shadow: 0 10px 30px rgba(0,0,0,0.7);
@@ -614,7 +598,6 @@ input[type="file"] {
 	border: 1px solid var(--border-color);
 	padding: 5px 10px;
 	cursor: pointer;
-	border-radius: 4px;
 	font-size: 11px;
 }
 
@@ -625,7 +608,6 @@ input[type="file"] {
 	resize: none;
 	background: #0d0d0d;
 	padding: 10px;
-	border-radius: 4px;
 	border: 1px solid #252525;
 	overflow-x: auto;
 	color: #ff8888;
@@ -644,7 +626,6 @@ input[type="file"] {
 	cursor: pointer;
 	font-family: var(--main-mono-font);
 	font-weight: bold;
-	border-radius: 4px;
 	font-size: 12px;
 }
 
@@ -681,7 +662,6 @@ input[type="file"] {
 	background: var(--bg-color);
 	color: var(--accent-color);
 	border: 1px solid var(--border-color);
-	border-radius: 4px;
 	padding: 3px 9px;
 	cursor: pointer;
 	font-size: 12px;
@@ -717,7 +697,6 @@ input[type="file"] {
 	color: var(--text-color);
 	border: 1px solid var(--border-color);
 	border-bottom: none;
-	border-radius: 4px 4px 0 0;
 	padding: 7px;
 	cursor: pointer;
 	font-size: 13px;
