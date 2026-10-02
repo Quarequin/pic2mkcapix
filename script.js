@@ -1,4 +1,5 @@
 //script/init/htm.js
+document.querySelector("noscript").remove();
 document.querySelector("body").insertAdjacentHTML(
 	"beforeend",
 	`
@@ -53,17 +54,11 @@ No trace details available.</textarea>
 </div>
 <div id="status">System Status: Awaiting Image Upload Asset...</div>
 <form action="#" method="POST" id="parameters">
-	<div class="from-manage">
-		<button id="reload" width="50%" onclick="window.location.reload()">Reload Page</button>
-		<button id="reset" width="50%" type="reset">Reset Form</button>
-	</div>
 	<span><label width="100%">Select Target Source Image:</label><input type="file" id="file" /></span>
 	<div id="navbar">
-		<span align="center" style="width: 100%; height: 3em; margin-bottom: 3em;">
-			<a href="#size-settings">1.Size setting</a>
-			<a href="#processing-option">2.Process Edit</a>
-			<a href="#palette-manager">3.Palette Edit</a>
-		</span>
+		<button class="size-settings">1.Size setting</button>
+		<button class="processing-option">2.Process Edit</button>
+		<button class="palette-manager">3.Palette Edit</button>
 	</div>
 	<div class="settings-group">
 		<div class="half">
@@ -130,7 +125,7 @@ No trace details available.</textarea>
 					class="custom"
 				/>
 			</div>
-			<div id="processing-option" class="dropdown-selection-group">
+			<div id="processing-option" class="dropdown-selection-group hidden">
 				<label for="dithering-option" class="dropdown-label"
 					>Dithering Options:</label
 				><select id="dithering-option" class="custom-dropdown">
@@ -232,7 +227,7 @@ No trace details available.</textarea>
 				</select>
 			</div>
 		</div>
-		<div id="palette-manager" class="colorboard">
+		<div id="palette-manager" class="colorboard hidden">
 			<div class="palette-loader-container">
 				<label for="predefined-palette-select"
 					>Select Predefined Palette:</label
@@ -418,7 +413,8 @@ No trace details available.</textarea>
 		</div>
 	</div>
 	<div class="action-buttons">
-		<button id="run" type="submit" disabled>Convert Image</button
+		<button id="reset" type="reset">Reset Form</button
+		><button id="run" type="submit" disabled>Convert Image</button
 		><button id="copy" type="button" disabled>Download Text</button
 		><button id="download" type="button" disabled>Download Image</button>
 	</div>
@@ -4463,6 +4459,31 @@ function downloadBlob(e, t) {
 function getActiveOutputName() {
 	return document.getElementById("tab-ascii").classList.contains("active") ? "ascii" : "makecode";
 }
+
+let curnav = "size-settings";
+
+function changeNavOfFromUI(name) {
+	if (curnav === name) return;
+	const prevdom = document.querySelector(`div#${curnav}`);
+		if (prevdom !== undefined)
+			if (!prevdom.classList.contains("hidden"))
+				prevdom.classList.add("hidden");
+	const newdom = document.querySelector(`div#${name}`);
+	if (newdom !== undefined)
+		if (newdom.classList.contains("hidden"))
+			newdom.classList.remove("hidden"), curnav = name;
+}
+
+document.querySelector("div#navbar button.size-settings").addEventListener("click", async function(e) {
+	e.preventDefault();
+	new Promise(p => changeNavOfFromUI("size-settings"));
+}),document.querySelector("div#navbar button.processing-option").addEventListener("click", async function(e) {
+	e.preventDefault();
+	new Promise(p => changeNavOfFromUI("processing-option"));
+}),document.querySelector("div#navbar button.palette-manager").addEventListener("click", async function(e) {
+	e.preventDefault();
+	new Promise(p => changeNavOfFromUI("palette-manager"));
+})
 
 async function downloadOutputString(value, flag) {
 	let temporaryBlob = new Blob([value], { type: "text/plain" });
