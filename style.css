@@ -267,8 +267,8 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 {
 	display: block;
 	float: left;
-	width: 24.25%;
-	margin-right: 1%;
+	width: 32.6%;
+	margin-right: 1.104%;
 	color: var(--text-color);
 	background-color: var(--bg-color);
 	border: 1px solid var(--border-color);
@@ -279,14 +279,19 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 }
 
 #navbar button {
-	width: 32.65%;
-	margin: 0 1% 0 0;
+	width: 32.6%;
+	margin: 0 1.102% 0 0;
 	text-decoration: none;
 }
 
 .from-manage button { width: 49%; margin-bottom: 1em; text-decoration: none; }
 
 #navbar button:last-child, .from-manage button:last-child { margin-right: 0; }
+
+.action-buttons button:first-child {
+	width: 100%;
+	margin-bottom: 0.6em;
+}
 
 .action-buttons button:last-child {
 	margin-right: 0;

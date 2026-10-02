@@ -413,8 +413,8 @@ No trace details available.</textarea>
 		</div>
 	</div>
 	<div class="action-buttons">
-		<button id="reset" type="reset">Reset Form</button
-		><button id="run" type="submit" disabled>Convert Image</button
+		<button id="run" type="submit" disabled>Convert Image</button
+		><button id="reset" type="reset">Reset Form</button
 		><button id="copy" type="button" disabled>Download Text</button
 		><button id="download" type="button" disabled>Download Image</button>
 	</div>
