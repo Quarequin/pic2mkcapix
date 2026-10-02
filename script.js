@@ -1,5 +1,31 @@
+/**
+ * pic2mkcapix – Picture to MakeCode Arcade / Pixel-Art Converter
+ * ==============================================================
+ * This file is the modular JavaScript engine.
+ *
+ * Structure (preserve these section markers for future maintenance):
+ *   //script/init/htm.js          – page skeleton HTML injection
+ *   //script/init/error.js        – global error popup helpers (cleaned)
+ *   //script/init/section.js      – constants, dither matrices, palette presets
+ *   //script/engine/matrix/cpu.js – CPU quantize + dither + ASCII
+ *   //script/engine/matrix/gpu.js – WebGL accelerated path
+ *   //script/engine/media/decoder.js – GIF / APNG / WebP / WebM decoder
+ *   //script/engine/media/encoder.js – GIF / PNG encoder
+ *   //script/main.js              – UI, palette manager, conversion pipeline
+ *
+ * Humanization notes (this revision):
+ *   - Replaced minified literals (!0 → true, !1 → false, void 0 → undefined)
+ *   - Expanded the error-handling module with descriptive names
+ *   - Kept original section markers exactly as required
+ *   - Tab indentation and overall control flow preserved
+ *   - Fixed double-quote newline bugs that caused SyntaxError
+ *
+ * Further contributions welcome: rename remaining short locals in
+ * decoder / encoder / main / cpu when touching those areas.
+ */
+
 //script/init/htm.js
-document.querySelector("noscript").remove();
+document.querySelector("body div#preload").remove();
 document.querySelector("body").insertAdjacentHTML(
 	"beforeend",
 	`
@@ -503,38 +529,64 @@ No trace details available.</textarea>
 );
 //end
 //script/init/error.js
-!(function () {
-	const e = (e) => document.getElementById(e),
-		o = e("notification-popup-overlay");
-	function n(n, t, r) {
-		((e("popup-err-type").textContent = n || "Runtime Error"),
-			(e("popup-err-message").textContent = t || "Unknown error."),
-			(e("popup-err-stack").value = r || "No call stack trace records."),
-			(e("popup-err-stack").style.display = "none"),
-			(e("btn-toggle-log").textContent = "Show Full Log ▼"),
-			o && (o.style.display = "block"));
+(function () {
+	const getElement = (id) => document.getElementById(id);
+	const overlay = getElement("notification-popup-overlay");
+
+	function displayErrorPopup(errorType, message, stackTrace) {
+		getElement("popup-err-type").textContent = errorType || "Runtime Error";
+		getElement("popup-err-message").textContent = message || "Unknown error.";
+		getElement("popup-err-stack").value = stackTrace || "No call stack trace records.";
+		getElement("popup-err-stack").style.display = "none";
+		getElement("btn-toggle-log").textContent = "Show Full Log ▼";
+		if (overlay) {
+			overlay.style.display = "block";
+		}
 	}
-	function t() {
-		const o = e("popup-err-stack"),
-			n = "none" === o.style.display || !o.style.display;
-		((o.style.display = n ? "block" : "none"),
-			(e("btn-toggle-log").textContent = n ? "Hide Full Log ▲" : "Show Full Log ▼"));
+
+	function toggleErrorLog() {
+		const stackTextarea = getElement("popup-err-stack");
+		const isCurrentlyHidden =
+			stackTextarea.style.display === "none" || !stackTextarea.style.display;
+		stackTextarea.style.display = isCurrentlyHidden ? "block" : "none";
+		getElement("btn-toggle-log").textContent = isCurrentlyHidden
+			? "Hide Full Log ▲"
+			: "Show Full Log ▼";
 	}
-	function r() {
-		o && (o.style.display = "none");
+
+	function closeErrorPopup() {
+		if (overlay) {
+			overlay.style.display = "none";
+		}
 	}
-	((window.displayErrorPopup = n),
-		(window.toggleErrorLog = t),
-		(window.closeErrorPopup = r),
-		e("popup-close-btn")?.addEventListener("click", r),
-		e("btn-toggle-log")?.addEventListener("click", t),
-		window.addEventListener("error", (e) =>
-			n("Uncaught Runtime Exception", e.message, e.error?.stack),
-		),
-		window.addEventListener("unhandledrejection", (e) => {
-			const o = e.reason instanceof Error ? e.reason : new Error(String(e.reason));
-			n("Unhandled Promise Rejection", o.message, o.stack);
-		}));
+
+	// Expose to global scope for use by the rest of the application
+	window.displayErrorPopup = displayErrorPopup;
+	window.toggleErrorLog = toggleErrorLog;
+	window.closeErrorPopup = closeErrorPopup;
+
+	getElement("popup-close-btn")?.addEventListener("click", closeErrorPopup);
+	getElement("btn-toggle-log")?.addEventListener("click", toggleErrorLog);
+
+	window.addEventListener("error", (event) => {
+		displayErrorPopup(
+			"Uncaught Runtime Exception",
+			event.message,
+			event.error?.stack
+		);
+	});
+
+	window.addEventListener("unhandledrejection", (event) => {
+		const reason =
+			event.reason instanceof Error
+				? event.reason
+				: new Error(String(event.reason));
+		displayErrorPopup(
+			"Unhandled Promise Rejection",
+			reason.message,
+			reason.stack
+		);
+	});
 })();
 //end
 //script/init/section.js
@@ -941,7 +993,7 @@ function cachedFindNearest(t, n, e, i, o) {
 	const a = ((255 & t) << 16) | ((255 & n) << 8) | (255 & e);
 	let r = o.get(a);
 	return (
-		void 0 !== r ||
+		undefined !== r ||
 			((r = findNearestColor(t, n, e, i)), o.size >= 4096 && o.clear(), o.set(a, r)),
 		r
 	);
@@ -1010,7 +1062,7 @@ function buildRowString(t, n, e, i, o, a, r) {
 		((i[u] = d.r),
 			(i[u + 1] = d.g),
 			(i[u + 2] = d.b),
-			(i[u + 3] = r && void 0 !== d.a ? d.a : 255));
+			(i[u + 3] = r && undefined !== d.a ? d.a : 255));
 	}
 	return c;
 }
@@ -1527,7 +1579,7 @@ class GLEngine {
 						(l[i] = d.r),
 						(l[i + 1] = d.g),
 						(l[i + 2] = d.b),
-						(l[i + 3] = s && void 0 !== d.a ? d.a : 255));
+						(l[i + 3] = s && undefined !== d.a ? d.a : 255));
 				}
 			}
 			i ? await i(e, r, _) : (h += r + "\n");
@@ -2346,7 +2398,7 @@ function encodeAnimatedGif(e) {
 		i = [..."GIF89a"].map((e) => e.charCodeAt(0));
 	(writeGifWord(i, e.width), writeGifWord(i, e.height), i.push(240 | (n - 1), 0, 0));
 	for (const e of t) i.push(e.r, e.g, e.b);
-	if (null !== e.repeat && void 0 !== e.repeat) {
+	if (null !== e.repeat && undefined !== e.repeat) {
 		i.push(33, 255, 11);
 		for (const e of "NETSCAPE2.0") i.push(e.charCodeAt(0));
 		i.push(3, 1, 255 & e.repeat, (e.repeat >> 8) & 255, 0);
@@ -2401,7 +2453,7 @@ function createGifStreamWriter(e) {
 	(writeGifWord(i, e.width), writeGifWord(i, e.height), i.push(240 | (n - 1), 0, 0));
 	for (const e of t) i.push(e.r, e.g, e.b);
 	const o = [new Uint8Array(i)];
-	if (null !== e.repeat && void 0 !== e.repeat) {
+	if (null !== e.repeat && undefined !== e.repeat) {
 		const t = [
 			33,
 			255,
