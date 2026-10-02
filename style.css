@@ -268,7 +268,7 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	display: block;
 	float: left;
 	width: 32.6%;
-	margin-right: 1.104%;
+	margin-right: 1.1%;
 	color: var(--text-color);
 	background-color: var(--bg-color);
 	border: 1px solid var(--border-color);
@@ -276,12 +276,6 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	cursor: pointer;
 	font-size: 13px;
 	text-align: center;
-}
-
-#navbar button {
-	width: 32.6%;
-	margin: 0 1.102% 0 0;
-	text-decoration: none;
 }
 
 .from-manage button { width: 49%; margin-bottom: 1em; text-decoration: none; }
