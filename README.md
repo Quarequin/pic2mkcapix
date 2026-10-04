@@ -1,7 +1,7 @@
 # pix2mkcapix
 ## Convert Picture to Makecode-arcade or Pixel-art
 
-[![[[makecode arcade]] tested anim picture: rickroll meme](pictest1.gif)](https://arcade.makecode.com/S51805-37097-94553-76715)
+<center><p align="center"><a href="https://arcade.makecode.com/S51805-37097-94553-76715"><img width="70%" alt="[makecode arcade] tested anim picture: rickroll meme" src="pictest1.gif"></a></p></center>
 
 visit at [page](https://quarequin.github.io/pic2mkcapix)
 
@@ -10,9 +10,9 @@ download offline at [here](https://github.com/Quarequin/pic2mkcapix/releases/lat
 download source at [here](https://github.com/Quarequin/pic2mkcapix/raw/refs/heads/main/pack/PIC2MKCAS.zip)
 
 <dl>
-<dt>note for anti-ai user:</dt>
-<dd>this project use <i>ai</i> to make project but you can fork this to make clean-code-reverse-engineer as human code(if possible) sorry. :(</dd>
-<dl>
+    <dt>note for anti-ai user:</dt>
+    <dd>this project use <i>ai</i> to make project but you can fork this to make clean-code-reverse-engineer as human code(if possible) sorry. :(</dd>
+</dl>
 
 ---
 
