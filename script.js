@@ -80,7 +80,7 @@ No trace details available.</textarea>
 </div>
 <div id="status">System Status: Awaiting Image Upload Asset...</div>
 <form action="#" method="POST" id="parameters">
-	<span><label width="100%">Select Target Source Image:</label><input type="file" id="file" /></span>
+	<span><label width="100%">Select Target Source Image:</label><input type="file" id="file" accept="image/*,video/webm,video/mp4,video/x-matroska,video/quicktime,.webm,.mp4,.mkv,.mov" /></span>
 	<div id="navbar">
 		<button class="size-settings">1.Size setting</button>
 		<button class="processing-option">2.Process Edit</button>
@@ -246,11 +246,13 @@ No trace details available.</textarea>
 					</div>
 				</div>
 				<hr />
-				<label class="dropdown-label">Processing Engine:</label
+				<label for="engine-select" class="dropdown-label">Processing Engine:</label
 				><select id="engine-select" class="custom-dropdown">
-					<option value="cpu" selected>CPU (JavaScript)</option>
-					<option value="gpu">GPU (WebGL)</option>
+					<option value="script" selected>script</option>
+					<option value="webgl">webgl</option>
+					<option value="wasm">wasm</option>
 				</select>
+				<small id="wasm-status">WASM is optional; JavaScript fallback is active.</small>
 			</div>
 		</div>
 		<div id="palette-manager" class="colorboard hidden">
@@ -726,6 +728,7 @@ const mediaFileInput = document.getElementById("file"),
 	renderTilePowerInput = document.getElementById("render-tile-power"),
 	renderTileSizeLabel = document.getElementById("render-tile-size-label"),
 	engineSelect = document.getElementById("engine-select"),
+	wasmStatus = document.getElementById("wasm-status"),
 	makecodeEnableCheck = document.getElementById("makecode-enable"),
 	makecodeAutoStatus = document.getElementById("makecode-auto-status"),
 	asciiEnableCheck = document.getElementById("ascii-enable"),
@@ -742,6 +745,7 @@ const mediaFileInput = document.getElementById("file"),
 	textarea = document.getElementById("output"),
 	previewContainer = document.querySelector(".image-preview-container"),
 	outputImage = document.getElementById("output-image"),
+	outputVideo = null,
 	canvas = document.getElementById("process-canvas"),
 	ctx = canvas.getContext("2d", {
 		willReadFrequently: !0,
@@ -1049,17 +1053,21 @@ function buildAsciiLine(t, n, e, i, o, a, r, l) {
 function buildRowString(t, n, e, i, o, a, r) {
 	const l = t * n;
 	let c = "";
-	for (let t = 0; t < n; t += 1) {
-		const n = l + t,
-			s = e[n];
-		c += a[s];
-		const u = n << 2;
-		if (!s) {
-			i[u] = i[u + 1] = i[u + 2] = i[u + 3] = 0;
-			continue;
-		}
-		const d = o[s];
-		((i[u] = d.r),
+		for (let t = 0; t < n; t += 1) {
+			const n = l + t,
+				s = e[n];
+			c += a[s];
+			const u = n << 2;
+			const d = o[s];
+			if (!d) {
+				i[u] = i[u + 1] = i[u + 2] = i[u + 3] = 0;
+				continue;
+			}
+			if (r && d.a === 0) {
+				i[u] = i[u + 1] = i[u + 2] = i[u + 3] = 0;
+				continue;
+			}
+			((i[u] = d.r),
 			(i[u + 1] = d.g),
 			(i[u + 2] = d.b),
 			(i[u + 3] = r && undefined !== d.a ? d.a : 255));
@@ -1216,6 +1224,121 @@ function createDitheringBuffer(data) {
 	return new Uint8ClampedArray(data);
 }
 
+const WASM_PIPELINE_BASE64 = "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GACYADIAsgASAJIAOgC6ABoAmgDwAHAA0ABQAPgAeADYAFgA8gByANIAUgD6AHoA2gBaAAwAjAAsAKwABACEACQApAAOAI4ALgCuAAYAhgAmAKYAzABMAOwAbADEAEQA5ABkAM4ATgDuAG4AxgBGAOYAZgA8ALwAHACcADQAtAAUAJQAPgC+AB4AngA2ALYAFgCWAPwAfADcAFwA9AB0ANQAVAD+AH4A3gBeAPYAdgDWAFYAAwCDACMAowALAIsAKwCrAAEAgQAhAKEACQCJACkAqQDDAEMA4wBjAMsASwDrAGsAwQBBAOEAYQDJAEkA6QBpADMAswATAJMAOwC7ABsAmwAxALEAEQCRADkAuQAZAJkA8wBzANMAUwD7AHsA2wBbAPEAcQDRAFEA+QB5ANkAWQAPAI8ALwCvAAcAhwAnAKcADQCNAC0ArQAFAIUAJQClAM8ATwDvAG8AxwBHAOcAZwDNAE0A7QBtAMUARQDlAGUAPwC/AB8AnwA3ALcAFwCXAD0AvQAdAJ0ANQC1ABUAlQD/AH8A3wBfAPcAdwDXAFcA/QB9AN0AXQD1AHUA1QBVAI0AugCVADQAZQC2AIkAaQCqAHEAzgAUAPIAmQDKAPYAQADeAFAAIAB1AAwAWQAoABAAMAChANIAsgA8ABgAAADmAF0A+gCRAEgA6gC+AG0AOAAEAHkAxgCdAH0AJADWAEQACAAsAK4AhQD/AFUAHADiAGEA7gBMANoAgQDCAKUA4wCNAIEA7ACgAIYARwAeAKIA6wBjANEAbADAAF4AmwBOAL4AmQA1AFYA4ACyAJQAXQAqALcAkAAaAEkACgApAIsAAwD4AHMAyAANAD8A+QCqAH4A1QA4AKYA6AB2AMwAOwDcAKwAcAAhAJoA9QBYAMMADgAwAGgAuQAGAJYAUACDAPEAYAAVALQARgCJABYA7QBUACYAygABAEMA3gB6APwALgCkAIAA/wBrADQAvwCPANoACwCeAFsAsAAoAM8AEQBuAEoA6QAtAMYAGQB4ADwA9wBlAB0AhgAyAPAAqABSAMUABQC7AJ8ATQDUACMArQAIAHIARQDiAJMAEwBeAOoAiAA6ALUADgBcAPoALADTAIQANgDBAAwAVgDfAGkAMQCrAG0AHADzAH0ARACcAAQAtgBhACQA/gCXAEAA2AC9AB8A7gBTAKcALwDOAHQA9AARAJIATwDHACoAdQDmAAIAoQBkABMAjADdADkAuQBmAEgA1wAKAH8A/QBZALIASwDQACsA+wBvAAYAowAiALwAgQA9AO8AGAClADcAxACRABsAfABfAOYAmABRAPYADwBxADAArwDMACUAjgAJANsAQgDCABIATACHABcAagDnADMAtwAHAHkA9wBnANYAPgCpAAAAlQDSAFcAyQAnAKgAYgAhAJ4AFADkAI0AuACaALUAKgAUAE8AIgBtABIAXwCHAL4AVADKAIAAvgBEACIAAQAXAFQA7QBGAOEAkADtAKUAMQBmAO0AbQC6AEYACQB0ANwA+ACjAP0AkwDUADcA9QAOAKcAJgA5AAsA6QCYAMUAiwCuADYAegAOAFwAPwANAMUAtAAaAI4AOwDZAIMAzABYADQAiQBlABwAwgDmAHcAsAD0AGAA1gCcAC4AbwBRANsAIADxAKAAzgCEAOMAeAD7AFkAwgAFAGcAqAAkAK0ADwDlAEAAuQDvAEkABAAyABUAfgAjAE4AvwCKABwAlQBAAHEAEQBIACYAsQAwAJsAIQBDANoAoQBOABUA8wBpAMcAOgDeAAwAngBbAKkAyQCPADsA+QARAGoA3wC2AF8A7AAGAJcAZADTAAoAUwDJAHsA8gAMAIUA5gAvAFAAKQD6AHwAJwCrADAAhgD/AG4AUgC8ACgAgQBHAMMANQCkABQAfwC9ACwAiAD+AB0ArAA0AGsAuwBeABkA0QDYAJEAGwC3AGAA6wBNABMAPQDiAJcACACmAF0A9wAfAHMASwDGADoA6ABRABMAdQDfACkAngBMAP8AOQCWAHIAPgDoAHAABwDVADUAjQDLAH0AJQBoAMUAMQCzAA0AVQDwAC4AggDzAA8AqQA+AJIAYAC1AAgAxwAjAH4AzQBYAK8AAgDBAEIAnAAeAGYA9wBWAK0AFQBEAJ0A3QBsAMIAPACZAAsAVwC4AIAA7AAzAIYA3ABFAJQA8gAQACwAswB2AOUALwCLAAsA4ABDALUAKgD6AJEAIQBUAAYA7gBKAKUAZQDZACsAYwAYAKMATwALAPwAagAfAKsAUwDFAHkANgChAGQA/wBKAL0AdAAFAJ8AYQA2ANIAfwAtAKEAHQDUADgAjAC/AEYA0AAtAL4AkwA8ALcA4AA3AIwACgDsAM8AFwCEAFEA1gAuAJgA5wATAIgATQC6AP0AdgDLADQAIgB7AOIABQCbACUAcgDqABwAXwDXACgAgQD5AEgApQAmALsADgCsADwAgQD1AGwAPwDMABwAXACQAEMADACwAPcAWwAwAKoAZgD6AFQABgCtAIMAMwDHABYAaAC8ADUAjwBEAOQAXQDJACYAEQBOAKgAcQDyADgAuQDmAFkAKQCeABYAhwA7ANoAjQDBAHoAOQD2AG4AUACaACUA5wBiAPsAegAxAMMACACmANwALACJAAIASwCVABcAaQD+AJMATgDMACEAdAA/ALQAHQCfAGQAFQCkAOsAMADVAHUABwAQALEAagAiAJ0AVQA2AMAAdQDqACsAogDGAD0AgAATALsAMQDhAF4A1QAuAH4AzQBJAJEAHgBwAL8APgCIANsAtgBBAPAADQBvAMsAGgBbAA4AswBlACYAUQCsADgA3QAOAKgATQCXACMAbAD0ABEAnABYAM8AKgB9AP4AFABgACwA0QB8ADIArQAHAJQAPwD2AHgANQDRABwAjwBfACIAwABzADoA5gAMALkARwCKADIA8QCpABwAtQBKAJ8ALgDpABwAngBWAMUAJADhAIMASAATAKAA9wBuAEAAuwD8AGoALADHAFIApwA2ANsAYQAKAMQAeQBAAOkACACPAG8AZgA3AOwAEwCNAPoAXgArALwAUwDmAA8ATACbACoAgABJAKEAGwBxAO0AgQAgALAAVQDaAC8AmQBmAMIAOQD4AKcATgDZADwAIABzALEAOQDMAIYAMACrAN4ACQDGAD0A1gCIAF0AtQAUAD8AlgDyACYAfwD/AEYAiQAdAOIAVAANAMIAbgCTAOUARAAVAKUAZAAmAHQAwwA0AIwAGABTAC8ArAAmAPgAaQDIAFkAGQCuADoA0wBfABMApgAzAHsAkQAqAP8AXAAFALcAbQDtAE8AmwD9AEUAowDtAHUALQCcAB0AdwBEANYAMACFAD0A3gCRACMAvQD1AGwAyABLACMArABPABUAoQA2AIAALgDWAAwAWACSAB8AZgC9AP4AYQC4ADQA4wALAKMATgDsAGcAHgCYAFEAEQCEAD4A7gDMAHYANQDGAHEA9AAhAL8AmABDALQAKQDPAEoAiAAVADwAjQD5ABAAXgCAACwAvwA4ANwAgADCAFoA9wArAJwACwDmAI0AJQBWABIAnABgABkAewDJADoAlQDoADkApgDNAE8AIgB1AK0ANwDSAHsApwAMAEcAuQA2AHQAywAfAGMAQAC9APYAqQBMANIAiwDeADEAVQCtACgAcwD9AFgALgCXAN8APgCLAAIAUACeAOUAYQCSACYA2wCxAAkARACYABkAawAOADoAwQAtAOsAogBqACUAmgD1ABIAgwBIALoAZQA2AMEAHABzAO0AMQB+ANUAQQD7AIUAKABfALYA2wBSAK8AgADnAAMAeABHAA4AxwB+AD0AYACzACsA0gCBABEApABYAM4ARgCYACIAtQA5AHAAHQCeAOAATQCQADAAyQAoAFsApQCGADMAuwD6AFwAkAAcAEQAlwDqADkA8gB9AEkAwwAqAIEA3wBbABQAigD2AFQAvwA1AHkAAAB0ADgA1QAeAJUAUADNAG4ANQCoACMAcQDKAFQAEwCgAGcAMADUACQAmgD3AEIArwBsACAAqgA/AOsAkwAaAMYAQwC0AAwA8QBoAOIAPwATAI8A2gBMALcALwCEAPsAXwAmAKsAOwCMANoAZQAtAIUA8QCbAFcAxwAsAG4AswD6AAAEAAAgBAAAoAQAAKAGAAAgBwAAIAkAAAQAAAAIAAAAEAAAAAgAAAAQAAAAIAAAAA8AAAA/AAAA/wAAAP8AAAD/AAAA/wAAAABKBG5hbWUACgljb21wLndhc20BFwIABm1lbXNldAEMY29tcF9wcm9jZXNzBxIBAA9fX3N0YWNrX3BvaW50ZXIJCgEABy5yb2RhdGEAOAlwcm9kdWNlcnMBDHByb2Nlc3NlZC1ieQEMVWJ1bnR1IGNsYW5nETE4LjEuMyAoMXVidW50dTEpACwPdGFyZ2V0X2ZlYXR1cmVzAisPbXV0YWJsZS1nbG9iYWxzKwhzaWduLWV4dA==";
+let wasmRuntimePromise = null;
+
+function wasmBytesFromBase64(value) {
+	const binary = atob(value);
+	const bytes = new Uint8Array(binary.length);
+	for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+	return bytes;
+}
+
+async function loadWasmRuntime() {
+	if (typeof WebAssembly === "undefined") throw new Error("WebAssembly is not supported by this browser.");
+	let response;
+	try {
+		response = await fetch("comp.wasm", { cache: "no-store" });
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	} catch {
+		return WebAssembly.instantiate(wasmBytesFromBase64(WASM_PIPELINE_BASE64), {});
+	}
+	return WebAssembly.instantiate(await response.arrayBuffer(), {});
+}
+async function ensureWasmRuntime() {
+	if (engineSelect.value !== "wasm") return null;
+	if (!wasmRuntimePromise) wasmRuntimePromise = loadWasmRuntime();
+	try {
+		const result = await wasmRuntimePromise;
+		wasmStatus.textContent = "WASM C quantizer ready; JavaScript/GPU fallback remains available.";
+		return result.instance;
+	} catch (error) {
+		wasmRuntimePromise = null;
+		engineSelect.value = "script";
+		wasmStatus.textContent = `WASM unavailable; JavaScript fallback active (${error.message}).`;
+		return null;
+	}
+}
+
+//script/engine/wasm/pipeline.js
+// WASM produces the indexed image while onRow streams each completed row to
+// the MakeCode/ASCII writers. DOM and textarea updates remain JavaScript-only.
+async function runWasmPipeline(data, width, height, mode, output, onProgress, onRow, hasAlpha) {
+	const instance = await ensureWasmRuntime();
+	if (!instance?.exports?.memory || !instance.exports.comp_process) return null;
+	setProcessingStatusLine("graphics", "WASM: Preparing frame...");
+	runButton.textContent = "WASM: Preparing...";
+	const sourceOffset = 4;
+	const sourceBytes = data.byteLength;
+	const paletteBytes = rgbPalette.length * 4;
+	const outputBytes = width * height * 2;
+	const errorBytes = width * 3 * 2 * 4;
+	const paletteOffset = (sourceOffset + sourceBytes + 7) & ~7;
+	const outputOffset = (paletteOffset + paletteBytes + 7) & ~7;
+	const errorOffset = (outputOffset + outputBytes + 7) & ~7;
+	const requiredBytes = errorOffset + errorBytes + 65536;
+	const requiredPages = Math.ceil(requiredBytes / 65536);
+	const memory = instance.exports.memory;
+	const currentPages = memory.buffer.byteLength / 65536;
+	if (currentPages < requiredPages) memory.grow(requiredPages - currentPages);
+	if (memory.buffer.byteLength < requiredBytes)
+		throw new Error(`WASM memory is too small for ${width}×${height} frame.`);
+	const bytes = new Uint8Array(memory.buffer);
+	bytes.set(new Uint8Array(data.buffer, data.byteOffset, sourceBytes), sourceOffset);
+	for (let index = 0; index < rgbPalette.length; index += 1) {
+		const color = rgbPalette[index];
+		const offset = paletteOffset + index * 4;
+		bytes[offset] = color.r;
+		bytes[offset + 1] = color.g;
+		bytes[offset + 2] = color.b;
+		bytes[offset + 3] = color.a ?? 255;
+	}
+	const modeId = { solid: 0, bayer4: 1, bayer8: 2, bayer16: 3, blue8: 4, blue16: 5, blue32: 6, error: 7 }[mode] ?? 0;
+	const result = instance.exports.comp_process(
+		sourceOffset,
+		paletteOffset,
+		outputOffset,
+		width,
+		height,
+		rgbPalette.length,
+		modeId,
+		errorOffset,
+		memory.buffer.byteLength,
+	);
+	if (result !== 0) throw new Error("WASM quantizer rejected the frame.");
+	const indexMap = new Uint16Array(width * height);
+	indexMap.set(new Uint16Array(memory.buffer, outputOffset, width * height));
+	const sampledStep = Math.max(4, Math.floor(indexMap.length / 4096) * 4);
+	const usedIndices = new Set();
+	let sourceMinimum = 255;
+	let sourceMaximum = 0;
+	for (let offset = 0; offset < data.length; offset += sampledStep) {
+		sourceMinimum = Math.min(sourceMinimum, data[offset], data[offset + 1], data[offset + 2]);
+		sourceMaximum = Math.max(sourceMaximum, data[offset], data[offset + 1], data[offset + 2]);
+		usedIndices.add(indexMap[offset >> 2]);
+		if (usedIndices.size > 1) break;
+	}
+	if (usedIndices.size <= 1 && sourceMaximum - sourceMinimum > 24 && rgbPalette.length > 2) {
+		setProcessingStatusLine("graphics", "WASM: invalid index map; using Script fallback...");
+		return null;
+	}
+	const progressStep = Math.max(1, Math.ceil(height / 32));
+	for (let row = 0; row < height; row += 1) {
+		throwIfStopRequested();
+		const line = buildRowString(row, width, indexMap, output.data, rgbPalette, CHAR_TABLE, hasAlpha);
+		if (onRow) await onRow(row, line, indexMap.subarray(row * width, (row + 1) * width));
+		if ((row + 1) % progressStep === 0 || row === height - 1) {
+			const progress = ((row + 1) / height * 100).toFixed(2);
+			await onProgress(progress);
+			setProcessingStatusLine("graphics", `WASM: Processing ${progress}%`);
+			runButton.textContent = `WASM: ${progress}%`;
+		}
+	}
+	setProcessingStatusLine("graphics", "WASM: Finalize 100%");
+	runButton.textContent = "WASM: Finalize 100%";
+	return { hexString: "", indexMap };
+}
+//end
 async function runConversionPipeline({
 	data,
 	w,
@@ -1226,12 +1349,16 @@ async function runConversionPipeline({
 	onProgress,
 	onRow,
 	hasAlpha,
-	engine = "cpu",
+	engine = "script",
 }) {
 	throwIfStopRequested();
 	const tileSize = renderTileSize(w, h);
+	if (engineSelect.value === "wasm") {
+		const wasmResult = await runWasmPipeline(data, w, h, mode, outImgData, onProgress, onRow, hasAlpha);
+		if (wasmResult) return wasmResult;
+	}
 	if (tileSize >= Math.max(w, h)) {
-		return engine === "gpu"
+		return engine === "webgl"
 			? runGLPipeline({
 					canvas,
 					data,
@@ -1273,7 +1400,7 @@ async function runConversionPipeline({
 			}
 			const ditheringBuffer = createDitheringBuffer(tileData);
 			const tileOutput = { data: new Uint8ClampedArray(tileW * tileH * 4) };
-			const tileProcessor = engine === "gpu" ? runGLPipeline : runTileCore;
+			const tileProcessor = engine === "webgl" ? runGLPipeline : runTileCore;
 			const tileMap = await tileProcessor({
 				data: ditheringBuffer,
 				w: tileW,
@@ -2171,7 +2298,7 @@ class PNGDecoder {
 	}
 }
 
-class WebMDecoder {
+class VideoDecoder {
 	constructor(e, t) {
 		((this.buffer = e), (this.mimeType = t || "video/webm"));
 	}
@@ -2186,7 +2313,7 @@ class WebMDecoder {
 		try {
 			await new Promise((e, r) => {
 				((t.onloadedmetadata = e),
-					(t.onerror = () => r(new Error("Unable to decode WebM video."))));
+					(t.onerror = () => r(new Error("Unable to decode this video container or codec."))));
 			});
 			const r = t.videoWidth,
 				i = t.videoHeight,
@@ -2204,7 +2331,7 @@ class WebMDecoder {
 									},
 									n = () => {
 										(t.removeEventListener("error", n),
-											r(new Error("WebM frame seek failed.")));
+											r(new Error("Video frame seek failed.")));
 									};
 								(t.addEventListener("seeked", i, {
 									once: !0,
@@ -2340,11 +2467,11 @@ async function decodeAnimation(e, t) {
 			}
 		);
 	}
-	if ("video/webm" === r)
+	if (r.startsWith("video/"))
 		return {
 			frameCount: null,
 			repeat: 0,
-			open: async () => new WebMDecoder(e, r).open(),
+			open: async () => new VideoDecoder(e, r).open(),
 		};
 	if ("image/jxl" === r) return frameArraySource(await decodeJXL(e));
 	if ("image/webp" === r) throw new Error("Animated WebP requires browser ImageDecoder support.");
@@ -2624,55 +2751,56 @@ function createApngStreamWriter(e) {
 	};
 }
 
-function createWebmStreamWriter(e) {
-	if (!canvas.captureStream || "undefined" == typeof MediaRecorder)
-		throw new Error("This browser cannot encode processed WebM output safely.");
-	const t = canvas.captureStream(0),
-		a = t.getVideoTracks()[0],
-		n =
-			"function" != typeof MediaRecorder.isTypeSupported ||
-			MediaRecorder.isTypeSupported("video/webm")
-				? "video/webm"
-				: "";
-	if (!n)
-		throw (
-			t.getTracks().forEach((e) => e.stop()),
-			new Error("This browser does not provide a WebM MediaRecorder.")
-		);
-	const i = [],
-		o = new MediaRecorder(t, {
-			mimeType: n,
-			videoBitsPerSecond: 4e6,
-		}),
-		r = new Promise((e, t) => {
-			(o.addEventListener("dataavailable", (e) => {
-				e.data?.size && i.push(e.data);
-			}),
-				o.addEventListener("stop", e, {
-					once: !0,
-				}),
-				o.addEventListener("error", () => t(new Error("WebM recording failed.")), {
-					once: !0,
-				}));
-		});
-	return (
-		o.start(),
-		{
-			async add(e) {
-				a.requestFrame
-					? a.requestFrame()
-					: await new Promise((t) => setTimeout(t, Math.max(10, e.delay || 100)));
-			},
-			finish: async () => (
-				"inactive" !== o.state && o.stop(),
-				await r,
-				t.getTracks().forEach((e) => e.stop()),
-				new Blob(i, {
-					type: n,
-				})
-			),
-		}
+function videoMimeCandidates(extension) {
+	return {
+		webm: ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"],
+		mp4: ["video/mp4;codecs=avc1.42E01E", "video/mp4"],
+		mkv: ["video/x-matroska"],
+		mov: ["video/quicktime"],
+	}[extension] || [];
+}
+
+function createVideoStreamWriter(extension, options) {
+	if (!canvas.captureStream || typeof MediaRecorder === "undefined")
+		throw new Error(`This browser cannot encode ${extension.toUpperCase()} output.`);
+	const stream = canvas.captureStream(0);
+	const track = stream.getVideoTracks()[0];
+	const candidates = videoMimeCandidates(extension);
+	const mimeType = candidates.find((type) =>
+		type && (typeof MediaRecorder.isTypeSupported !== "function" || MediaRecorder.isTypeSupported(type)),
 	);
+	if (!mimeType) {
+		stream.getTracks().forEach((item) => item.stop());
+		throw new Error(
+			`This browser cannot encode ${extension.toUpperCase()} output while preserving the original container.`,
+		);
+	}
+	const chunks = [];
+	const recorder = new MediaRecorder(stream, {
+		mimeType,
+		videoBitsPerSecond: 4e6,
+	});
+	const stopped = new Promise((resolve, reject) => {
+		recorder.addEventListener("dataavailable", (event) => event.data?.size && chunks.push(event.data));
+		recorder.addEventListener("stop", resolve, { once: true });
+		recorder.addEventListener("error", () => reject(new Error(`${extension.toUpperCase()} recording failed.`)), { once: true });
+	});
+	recorder.start();
+	return {
+		async add(frame) {
+			if (track.requestFrame) track.requestFrame();
+			await new Promise((resolve) => setTimeout(resolve, Math.max(10, frame.delay || 100)));
+		},
+		finish: async () => {
+			if (recorder.state !== "inactive") recorder.stop();
+			await stopped;
+			stream.getTracks().forEach((item) => item.stop());
+			const blob = new Blob(chunks, { type: mimeType });
+			if (!blob.type.startsWith(`video/${extension === "mkv" ? "x-matroska" : extension === "mov" ? "quicktime" : extension}`))
+				throw new Error(`The browser returned a different video container instead of ${extension.toUpperCase()}.`);
+			return blob;
+		},
+	};
 }
 
 function encodeBmpFromCanvas(e) {
@@ -3087,24 +3215,39 @@ asciiEnableCheck.addEventListener("change", function () {
 	updateTextDownloadState();
 });
 
-if (!webglSupported) {
-	const e = engineSelect.querySelector('option[value="gpu"]');
-	(e && ((e.disabled = !0), (e.textContent += " (Not Supported)")),
-		addToSessionLog("SYSTEM", "WebGL not detected. GPU mode disabled."));
+function updateEngineAvailability() {
+	const errorDiffusion = ditheringSelect.value === "error";
+	const gpuOption = engineSelect.querySelector('option[value="webgl"]');
+	const wasmOption = engineSelect.querySelector('option[value="wasm"]');
+	if (gpuOption) gpuOption.disabled = errorDiffusion || !webglSupported;
+	if (errorDiffusion && engineSelect.value === "webgl") {
+		engineSelect.value = "script";
+		addToSessionLog("ENGINE", "Error Diffusion requires CPU; GPU option disabled.");
+	}
+	if (!webglSupported && engineSelect.value === "webgl") engineSelect.value = "script";
+	if (engineSelect.value === "wasm") {
+		wasmStatus.textContent = "Loading WASM C quantizer...";
+		ensureWasmRuntime().then((instance) => {
+			if (!instance?.exports?.comp_process) {
+				engineSelect.value = "script";
+				wasmStatus.textContent = "WASM unavailable; CPU JavaScript fallback active.";
+			} else wasmStatus.textContent = "WASM C quantizer ready.";
+		});
+	} else wasmStatus.textContent = "WASM is inactive; selected JavaScript engine is active.";
+	if (wasmOption) wasmOption.disabled = false;
 }
 
 engineSelect.addEventListener("change", function () {
-	if ("gpu" === this.value && !webglSupported)
-		return (
-			displayErrorPopup(
-				"WebGL Not Supported",
-				"Your browser or device does not support WebGL.",
-				"The GPU processing engine requires WebGL. Falling back to CPU mode.",
-			),
-			void (this.value = "cpu")
-		);
+	if (this.value === "webgl" && !webglSupported) {
+		this.value = "script";
+		displayErrorPopup("WebGL Not Supported", "Your browser or device does not support WebGL.", "Falling back to CPU mode.");
+	}
+	updateEngineAvailability();
 	addToSessionLog("ENGINE", `Switched to ${this.value.toUpperCase()} processing mode.`);
 });
+ditheringSelect.addEventListener("change", updateEngineAvailability);
+if (!webglSupported) addToSessionLog("SYSTEM", "WebGL not detected. GPU option disabled.");
+updateEngineAvailability();
 
 let processingStatusActive = false;
 
@@ -3501,22 +3644,22 @@ mediaFileInput.addEventListener("change", async function () {
 	const e = mediaFileInput.files[0];
 	if (!e)
 		return void (statusDiv.textContent =
-			"Invalid: No image file. Try selecting an image such as PNG, JPG, GIF, APNG, WebP, or WebM.");
+			"Invalid: No image file. Try selecting PNG, JPG, GIF, APNG, WebP, WebM, MP4, MKV, or MOV.");
 	const t = sourceMime(e);
-	if (/^image\//.test(t) || "video/webm" === t) {
+	if (/^image\//.test(t) || /^video\//.test(t)) {
 		((statusDiv.textContent = `System: Loading asset of "${e.name}".`),
 			(originalMimeType = t),
 			(sourceExtension = sourceExtensionOf(e)),
 			(uploadedFileBuffer = await e.arrayBuffer()));
 		try {
-			if ("video/webm" === t || isAnimatedBuffer(uploadedFileBuffer, t)) {
+			if (/^video\//.test(t) || isAnimatedBuffer(uploadedFileBuffer, t)) {
 				const a = await decodeAnimation(uploadedFileBuffer, t),
 					n = await inspectAnimationSource(a);
 				if (!n.first) throw new Error("No decodable animation frames were found.");
 				const i = createOriginalReviewElement(e),
 					o = n.frameCount || a.frameCount || 0;
 				(n.visuallyStatic
-					? ((animSource = null),
+					? ((animSource = /^video\//.test(t) ? a : null),
 						showLoadedPreview(i, n.first.width, n.first.height),
 						(uploadedFileBuffer = null),
 						(statusDiv.textContent = `Ready: "${e.name}" Loaded as a static image.`),
@@ -3558,7 +3701,7 @@ mediaFileInput.addEventListener("change", async function () {
 		} catch (e) {
 			(displayErrorPopup("Animation Decode Error", e.message, e.stack), resetLoadedState());
 		}
-	} else statusDiv.textContent = `Invalid: "${e.name}" is not a supported image or WebM file.`;
+	} else statusDiv.textContent = `Invalid: "${e.name}" is not a supported image or video file.`;
 });
 
 function revokeOutputObjectUrl() {
@@ -3566,15 +3709,40 @@ function revokeOutputObjectUrl() {
 }
 
 function setOutputBlob(e) {
-	outputImage &&
-		e &&
-		(revokeOutputObjectUrl(),
-		(outputBlob = e),
-		(outputObjectUrl = URL.createObjectURL(e)),
-		(outputImage.src = outputObjectUrl),
-		(outputImage.style.display = "block"),
-		(outputImage.style.visibility = "visible"),
-		outputImage.setAttribute("aria-hidden", "false"));
+	if (!e) return;
+	revokeOutputObjectUrl();
+	outputBlob = e;
+	outputObjectUrl = URL.createObjectURL(e);
+	if (e.type.startsWith("video/")) {
+		outputImage.style.display = "none";
+		outputImage.style.visibility = "hidden";
+		outputImage.setAttribute("aria-hidden", "true");
+		if (!outputVideo) {
+			outputVideo = document.createElement("video");
+			outputVideo.controls = true;
+			outputVideo.muted = true;
+			outputVideo.loop = true;
+			outputVideo.playsInline = true;
+			outputVideo.style.width = "100%";
+			outputVideo.style.height = "auto";
+			outputVideo.style.objectFit = "contain";
+			outputImage.parentElement.append(outputVideo);
+		}
+		outputVideo.src = outputObjectUrl;
+		outputVideo.style.display = "block";
+		outputVideo.setAttribute("aria-hidden", "false");
+		return;
+	}
+	if (outputVideo) {
+		outputVideo.removeAttribute("src");
+		outputVideo.load();
+		outputVideo.style.display = "none";
+		outputVideo.setAttribute("aria-hidden", "true");
+	}
+	outputImage.src = outputObjectUrl;
+	outputImage.style.display = "block";
+	outputImage.style.visibility = "visible";
+	outputImage.setAttribute("aria-hidden", "false");
 }
 
 function revokeOriginalPreviewObjectUrl() {
@@ -3600,6 +3768,12 @@ function resetLoadedState() {
 	revokeOutputObjectUrl();
 	if (outputImage) {
 		outputImage.removeAttribute("src");
+		if (outputVideo) {
+			outputVideo.removeAttribute("src");
+			outputVideo.load();
+			outputVideo.style.display = "none";
+			outputVideo.setAttribute("aria-hidden", "true");
+		}
 		outputImage.style.display = "block";
 		outputImage.style.visibility = "hidden";
 		outputImage.setAttribute("aria-hidden", "true");
@@ -3633,36 +3807,37 @@ function sourceExtensionOf(e) {
 			"image/webp": "webp",
 			"image/apng": "apng",
 			"video/webm": "webm",
+			"video/mp4": "mp4",
+			"video/x-matroska": "mkv",
+			"video/quicktime": "mov",
 		}[e.type] ||
 		"png"
 	);
 }
 
 function sourceMime(e) {
-	const t = sourceExtensionOf(e);
-	return (
-		e.type ||
-		{
-			gif: "image/gif",
-			apng: "image/apng",
-			png: "image/png",
-			webp: "image/webp",
-			jpg: "image/jpeg",
-			jpeg: "image/jpeg",
-			jpe: "image/jpeg",
-			bmp: "image/bmp",
-			jxl: "image/jxl",
-			webm: "video/webm",
-		}[t] ||
-		""
-	);
+	const extension = sourceExtensionOf(e);
+	const knownType = {
+		gif: "image/gif",
+		apng: "image/apng",
+		png: "image/png",
+		webp: "image/webp",
+		jpg: "image/jpeg",
+		jpeg: "image/jpeg",
+		jpe: "image/jpeg",
+		bmp: "image/bmp",
+		jxl: "image/jxl",
+		webm: "video/webm",
+		mp4: "video/mp4",
+		mkv: "video/x-matroska",
+		mov: "video/quicktime",
+	}[extension] || "";
+	return /^image\//.test(e.type) || /^video\//.test(e.type) ? e.type : knownType;
 }
-
-
 function createOriginalReviewElement(file) {
 	revokeOriginalPreviewObjectUrl();
 	originalPreviewObjectUrl = URL.createObjectURL(file);
-	if (sourceMime(file) === "video/webm") {
+	if (sourceMime(file).startsWith("video/")) {
 		const video = document.createElement("video");
 		video.autoplay = true;
 		video.loop = true;
@@ -3772,9 +3947,9 @@ async function encodeStaticOutput(e, t, a) {
 	throwIfStopRequested();
 	const indexedMap = prepareIndexedOutput(e.indexMap);
 	const indexedInput = { ...e, indexMap: indexedMap };
-	if ("jxl" === sourceExtension || "webm" === sourceExtension)
+	if (["jxl", "webm", "mp4", "mkv", "mov"].includes(sourceExtension))
 		throw new Error(
-			`This browser cannot encode processed ${sourceExtension.toUpperCase()} output without changing the requested extension.`,
+			`Animated ${sourceExtension.toUpperCase()} input must be processed through the video encoder.`,
 		);
 	if ("gif" === sourceExtension)
 		return encodeAnimatedGif({
@@ -4120,7 +4295,7 @@ async function processAnimation(e, t) {
 			h = imageDataHasAlpha(l.data),
 			g = c.onRow,
 			m =
-				"gpu" === s && renderSelect.value === "bitmap"
+				"webgl" === s && renderSelect.value === "bitmap"
 					? await runGLPipeline({
 							canvas: canvas,
 							data: l.data,
@@ -4137,7 +4312,7 @@ async function processAnimation(e, t) {
 									await yieldOutputFrame());
 							},
 						})
-					: "gpu" === s
+					: "webgl" === s
 						? await runGpuTiledPipeline(
 								l,
 								e,
@@ -4278,10 +4453,13 @@ async function runCPUPipelineFallback(e, t, a, n, i, j, o = imageDataHasAlpha(e.
 		hasAlpha: o,
 		onRow: r,
 		onProgress: async (e) => {
-			(renderSelect.value === "bitmap" && ctx.putImageData(n, 0, 0),
-				(runButton.textContent = !!j ? `${j}: ${e}%` : `Converting... ${e}%`),
-				setProcessingStatusLine("graphics", !!i ? `${i}: ${e}%` : `Processing CPU pipeline... ${e}%`),
-				await new Promise((e) => requestAnimationFrame(e)));
+			const wasmActive = engineSelect.value === "wasm";
+			if (renderSelect.value === "bitmap") ctx.putImageData(n, 0, 0);
+			if (!wasmActive) {
+				runButton.textContent = !!j ? `${j}: ${e}%` : `Converting... ${e}%`;
+				setProcessingStatusLine("graphics", !!i ? `${i}: ${e}%` : `Processing CPU pipeline... ${e}%`);
+			}
+			await new Promise((resolve) => requestAnimationFrame(resolve));
 		},
 	});
 }
@@ -4297,7 +4475,7 @@ async function runGpuTiledPipeline(e, t, a, n, i, j, o = imageDataHasAlpha(e.dat
 		outImgData: n,
 		hasAlpha: o,
 		onRow: r,
-		engine: "gpu",
+		engine: "webgl",
 		onProgress: async (progress) => {
 			runButton.textContent = j ? `${j}: ${progress}%` : `Converting... ${progress}%`;
 			setProcessingStatusLine(
@@ -4341,7 +4519,7 @@ function prepareIndexedOutput(indexMap) {
 function createAnimatedOutputWriter(e, t) {
 	if ("gif" === e) return createGifStreamWriter(t);
 	if ("apng" === e || "png" === e) return createApngStreamWriter(t);
-	if ("webm" === e) return createWebmStreamWriter(t);
+	if (["webm", "mp4", "mkv", "mov"].includes(e)) return createVideoStreamWriter(e, t);
 	throw new Error(
 		`Animated ${e.toUpperCase()} output cannot be encoded safely in this browser without changing the requested extension.`,
 	);
@@ -4442,7 +4620,7 @@ function downloadBlob(e, t) {
 				let l;
 				s.startStatic();
 				const c = imageDataHasAlpha(n.data);
-				("gpu" === o && renderSelect.value === "bitmap"
+				("webgl" === o && renderSelect.value === "bitmap"
 					? ((l = await runGLPipeline({
 							canvas: canvas,
 							data: n.data,
@@ -4460,7 +4638,7 @@ function downloadBlob(e, t) {
 							},
 						})),
 						ctx.putImageData(i, 0, 0))
-					: "gpu" === o
+					: "webgl" === o
 						? (l = await runGpuTiledPipeline(n, t, a, i, null, null, c, textOutputEnabled ? s.onRow : null))
 						: (l = await runCPUPipelineFallback(n, t, a, i, null, null, c, textOutputEnabled ? s.onRow : null)),
 					ctx.putImageData(i, 0, 0),
