@@ -1,7 +1,8 @@
 # pix2mkcapix
 ## Convert Picture to Makecode-arcade or Pixel-art
 
-<center><p align="center"><a href="https://arcade.makecode.com/S51805-37097-94553-76715"><img width="90%" alt="[makecode arcade] tested anim picture: rickroll meme" src="pictest1.gif"></a></p></center>
+<center><p align="center"><a href="https://arcade.makecode.com/S51805-37097-94553-76715"
+title="test anim from pic2mkcapix - makecode arcade"><img width="90%" alt="[makecode arcade] tested anim picture: rickroll meme" src="pictest0.gif"></a><br><a href="pictest1.gif" title="show full size of this media">zoom</a></p></center>
 
 visit at [page](https://quarequin.github.io/pic2mkcapix)
 
