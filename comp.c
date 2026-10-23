@@ -1,6 +1,17 @@
 //comp/core/quantizer.c
 #include <stdint.h>
 
+/* comp_process returns a byte-sized status code; 0 means success. */
+enum {
+	COMP_OK = 0,
+	COMP_INVALID_ARGUMENT = 1,
+	COMP_MISSING_ERROR_BUFFER = 2,
+	COMP_MEMORY_RANGE = 3,
+	COMP_UNSUPPORTED_MODE = 4,
+	COMP_DIMENSION_OVERFLOW = 5,
+	COMP_ERROR_CODE_MAX = 255,
+};
+
 void *memset(void *destination, int value, __SIZE_TYPE__ count) {
 	uint8_t *bytes = (uint8_t *)destination;
 	for (__SIZE_TYPE__ index = 0; index < count; ++index) bytes[index] = (uint8_t)value;
@@ -177,21 +188,25 @@ uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 	uint32_t width, uint32_t height, uint32_t palette_count, uint32_t mode,
 	uint32_t error_ptr, uint32_t memory_bytes) {
 	if (!src_ptr || !palette_ptr || !out_ptr || !width || !height || !palette_count || palette_count > 65535U)
-		return 1U;
+		return COMP_INVALID_ARGUMENT;
 	const uint64_t source_bytes = (uint64_t)width * height * 4U;
 	const uint64_t output_bytes = (uint64_t)width * height * 2U;
 	const uint64_t error_bytes = (uint64_t)width * 3U * 2U * sizeof(int32_t);
+	if (source_bytes > 0xffffffffULL || output_bytes > 0xffffffffULL || error_bytes > 0xffffffffULL)
+		return COMP_DIMENSION_OVERFLOW;
+	if (mode > 7U)
+		return COMP_UNSUPPORTED_MODE;
 	if ((uint64_t)src_ptr + source_bytes > memory_bytes ||
 		(uint64_t)palette_ptr + (uint64_t)palette_count * 4U > memory_bytes ||
 		(uint64_t)out_ptr + output_bytes > memory_bytes ||
 		(mode == 7U && ((uint64_t)error_ptr + error_bytes > memory_bytes)))
-		return 3U;
+		return COMP_MEMORY_RANGE;
 	const uint8_t *src = (const uint8_t *)(uintptr_t)src_ptr;
 	const uint8_t *palette = (const uint8_t *)(uintptr_t)palette_ptr;
 	uint16_t *out = (uint16_t *)(uintptr_t)out_ptr;
 	int32_t *errors = (int32_t *)(uintptr_t)error_ptr;
 	const uint32_t row_bytes = width * 3U;
-	if (mode == 7U && !error_ptr) return 2U;
+	if (mode == 7U && !error_ptr) return COMP_MISSING_ERROR_BUFFER;
 	if (mode == 7U) for (uint32_t i = 0; i < row_bytes * 2U; ++i) errors[i] = 0;
 	for (uint32_t y = 0; y < height; ++y) {
 		int32_t *current = errors + ((y & 1U) * row_bytes);
@@ -224,6 +239,6 @@ uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 			}
 		}
 	}
-	return 0U;
+	return COMP_OK;
 }
 //end
