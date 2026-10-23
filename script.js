@@ -459,7 +459,19 @@ No trace details available.</textarea>
 		><button id="download" type="button" disabled>Download Image</button>
 	</div>
 </form>
-<div class="image-preview-container">
+<div id="viewer-controls" class="viewer-controls">
+	<label class="viewer-toggle full-row">
+		<input type="checkbox" id="viewer-image-enable" checked />
+		Show image viewers (input + output preview)
+	</label>
+	<label class="viewer-toggle full-row">
+		<input type="checkbox" id="viewer-text-enable" checked />
+		Show text viewers (MakeCode + ASCII output)
+	</label>
+	<small class="viewer-toggle-hint">Hide will not update the viewer until it is restarted — when Convert will automatically close and lock the checkbox and restore it when it is done.</small>
+
+</div>
+<div class="image-preview-container" id="image-preview-container">
 	<div class="preview-box">
 		<h3>Original Input</h3>
 		<div id="original-res" class="resolution-info">Size: 0 x 0</div>
@@ -777,7 +789,12 @@ const mediaFileInput = document.getElementById("file"),
 	downloadMediaButton = document.getElementById("download"),
 	statusDiv = document.getElementById("status"),
 	textarea = document.getElementById("output"),
-	previewContainer = document.querySelector(".image-preview-container"),
+	previewContainer = document.getElementById("image-preview-container") || document.querySelector(".image-preview-container"),
+	viewerImageEnable = document.getElementById("viewer-image-enable"),
+	viewerTextEnable = document.getElementById("viewer-text-enable"),
+	outputTabs = document.getElementById("output-tabs"),
+	tabPixelart = document.getElementById("tab-pixelart"),
+	tabAscii = document.getElementById("tab-ascii"),
 	outputImage = document.getElementById("output-image"),
 	outputVideo = null,
 	canvas = document.getElementById("process-canvas"),
@@ -3390,6 +3407,8 @@ function getTextareaScrollRatio(textareaElement, fallback = 0) {
 }
 
 function renderOutputViewport(name) {
+	if (!isTextViewerEnabled()) return;
+
 	const state = getOutputState(name);
 	const textareaElement = state.textarea;
 	const value = getOutputString(name);
@@ -3449,6 +3468,7 @@ function renderOutputViewport(name) {
 	state.rendering = false;
 }
 function renderOutputViewports() {
+	if (!isTextViewerEnabled()) return;
 	renderOutputViewport("makecode");
 	renderOutputViewport("ascii");
 }
@@ -3457,7 +3477,7 @@ function finishOutputViewports() {
 	for (const name of ["makecode", "ascii"]) {
 		const state = getOutputState(name);
 		state.followTail = false;
-		state.textarea.scrollTop = 0;
+		if (isTextViewerEnabled()) state.textarea.scrollTop = 0;
 	}
 	renderOutputViewports();
 }
@@ -3646,6 +3666,102 @@ function updateRenderOptionControls() {
 renderSelect.addEventListener("change", updateRenderOptionControls);
 renderTilePowerInput.addEventListener("input", updateRenderOptionControls);
 updateRenderOptionControls();
+
+
+function isImageViewerEnabled() {
+	return !viewerImageEnable || viewerImageEnable.checked;
+}
+
+function isTextViewerEnabled() {
+	return !viewerTextEnable || viewerTextEnable.checked;
+}
+
+/** User preference captured right before a convert; restored when it finishes. */
+let viewerPrefsBeforeProcess = { image: true, text: true };
+let viewersLockedForProcess = false;
+
+function applyViewerVisibility() {
+	const showImage = isImageViewerEnabled();
+	const showText = isTextViewerEnabled();
+	// Must use explicit "block" — empty string falls back to stylesheet display:none
+	// and was hiding the graphics review panel after the checkbox panel was added.
+	if (previewContainer) {
+		previewContainer.style.display = showImage ? "block" : "none";
+		previewContainer.classList.toggle("is-visible", showImage);
+		previewContainer.setAttribute("aria-hidden", showImage ? "false" : "true");
+	}
+	if (outputTabs) {
+		outputTabs.style.display = showText ? "" : "none";
+		outputTabs.setAttribute("aria-hidden", showText ? "false" : "true");
+	}
+	if (!showText) {
+		if (tabPixelart) tabPixelart.style.display = "none";
+		if (tabAscii) tabAscii.style.display = "none";
+	} else {
+		const activeTab = document.querySelector(".tab-btn.active")?.dataset?.tab || "pixelart";
+		if (tabPixelart) {
+			tabPixelart.style.display = activeTab === "pixelart" ? "block" : "none";
+			tabPixelart.classList.toggle("active", activeTab === "pixelart");
+		}
+		if (tabAscii) {
+			tabAscii.style.display = activeTab === "ascii" ? "block" : "none";
+			tabAscii.classList.toggle("active", activeTab === "ascii");
+		}
+		renderOutputViewports();
+	}
+	if (showImage && outputObjectUrl && outputImage) {
+		if (outputImage.getAttribute("src") !== outputObjectUrl) {
+			outputImage.src = outputObjectUrl;
+		}
+		outputImage.style.display = "block";
+		outputImage.style.visibility = "visible";
+		outputImage.setAttribute("aria-hidden", "false");
+	}
+}
+
+/** Hide + lock viewer toggles for the duration of a convert. */
+function lockViewersForProcess() {
+	viewerPrefsBeforeProcess = {
+		image: !viewerImageEnable || viewerImageEnable.checked,
+		text: !viewerTextEnable || viewerTextEnable.checked,
+	};
+	viewersLockedForProcess = true;
+	if (viewerImageEnable) {
+		viewerImageEnable.checked = false;
+		viewerImageEnable.disabled = true;
+	}
+	if (viewerTextEnable) {
+		viewerTextEnable.checked = false;
+		viewerTextEnable.disabled = true;
+	}
+	applyViewerVisibility();
+}
+
+/** Restore pre-convert checkbox state and unlock. */
+function unlockViewersAfterProcess() {
+	viewersLockedForProcess = false;
+	if (viewerImageEnable) {
+		viewerImageEnable.disabled = false;
+		viewerImageEnable.checked = !!viewerPrefsBeforeProcess.image;
+	}
+	if (viewerTextEnable) {
+		viewerTextEnable.disabled = false;
+		viewerTextEnable.checked = !!viewerPrefsBeforeProcess.text;
+	}
+	applyViewerVisibility();
+}
+
+if (viewerImageEnable) {
+	viewerImageEnable.addEventListener("change", () => {
+		if (!viewersLockedForProcess) applyViewerVisibility();
+	});
+}
+if (viewerTextEnable) {
+	viewerTextEnable.addEventListener("change", () => {
+		if (!viewersLockedForProcess) applyViewerVisibility();
+	});
+}
+applyViewerVisibility();
 
 setButtonState("noImage");
 
@@ -4064,10 +4180,16 @@ function setOutputBlob(e) {
 		outputVideo.style.display = "none";
 		outputVideo.setAttribute("aria-hidden", "true");
 	}
-	outputImage.src = outputObjectUrl;
-	outputImage.style.display = "block";
-	outputImage.style.visibility = "visible";
-	outputImage.setAttribute("aria-hidden", "false");
+	if (isImageViewerEnabled()) {
+		outputImage.src = outputObjectUrl;
+		outputImage.style.display = "block";
+		outputImage.style.visibility = "visible";
+		outputImage.setAttribute("aria-hidden", "false");
+	} else {
+		outputImage.removeAttribute("src");
+		outputImage.style.display = "none";
+		outputImage.setAttribute("aria-hidden", "true");
+	}
 }
 
 function revokeOriginalPreviewObjectUrl() {
@@ -4108,17 +4230,16 @@ function resetLoadedState() {
 }
 
 function showLoadedPreview(e, t, a, n = 0) {
-	(previewContainer && (previewContainer.style.display = "block"),
-		(document.getElementById("original-res").textContent =
-			`Size: ${t} x ${a} px${n ? ` | Frames: ${n}` : ""}`),
-		document.getElementById("original-preview-zone").replaceChildren(e),
-		document.querySelectorAll("input[disabled]").forEach((e) => e.removeAttribute("disabled")),
-		(originalImageSize = {
-			width: t,
-			height: a,
-		}),
-		setButtonState("imageLoaded"),
-		updateCalculatedDimensions());
+	document.getElementById("original-res").textContent =
+		`Size: ${t} x ${a} px${n ? ` | Frames: ${n}` : ""}`;
+	document.getElementById("original-preview-zone").replaceChildren(e);
+	document.querySelectorAll("input[disabled]").forEach((el) => el.removeAttribute("disabled"));
+	originalImageSize = { width: t, height: a };
+	setButtonState("imageLoaded");
+	updateCalculatedDimensions();
+	// Respect the image-viewer checkbox (do not force-show when user hid it).
+	if (typeof applyViewerVisibility === "function") applyViewerVisibility();
+	else if (previewContainer && isImageViewerEnabled()) previewContainer.style.display = "block";
 }
 
 function sourceExtensionOf(e) {
@@ -4620,10 +4741,12 @@ function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled,
 			const rowMap = sourceRow || (asciiInputMap ? asciiInputMap.subarray(row * width, (row + 1) * width) : null);
 			if (rowMap) asciiRows.onSourceRow(row, rowMap);
 			rowsSinceRender += 1;
-			if (rowsSinceRender >= 40) {
+			if (isTextViewerEnabled() && rowsSinceRender >= 40) {
 				rowsSinceRender = 0;
 				renderOutputViewports();
 				await yieldOutputFrame();
+			} else if (!isTextViewerEnabled()) {
+				rowsSinceRender = 0;
 			}
 		},
 		finishStatic() {
@@ -4977,6 +5100,7 @@ function downloadBlob(e, t) {
 					(canvas.width = t),
 					(canvas.height = a),
 					(processingStatusActive = true),
+					lockViewersForProcess(),
 					setButtonState("processing"),
 					(runButton.textContent = "Converting..."),
 					(resetProcessingStatusLines(), setProcessingStatusLine("phase", currentStatus(0))),
@@ -4989,7 +5113,7 @@ function downloadBlob(e, t) {
 						await processAnimation(t, a),
 						(fr.disabled = false),
 						(processingStatusActive = false),
-						setButtonState("done"),
+						unlockViewersAfterProcess(), setButtonState("done"),
 						updateTextDownloadState(),
 						void (stopTextProcessingFlag
 							? (statusDiv.textContent = "Text output generation stopped by user.")
@@ -5053,7 +5177,7 @@ function downloadBlob(e, t) {
 					setOutputBlob(outputBlob),
 					(setProcessingStatusLine("phase", currentStatus(100))),
 					(processingStatusActive = false),
-					setButtonState("done"),
+					unlockViewersAfterProcess(), setButtonState("done"),
 					updateTextDownloadState(),
 					stopTextProcessingFlag
 						? (statusDiv.textContent = "Text output generation stopped by user.")
@@ -5061,8 +5185,10 @@ function downloadBlob(e, t) {
 			} catch (e) {
 				if (e?.name === "AbortError" || stopTextProcessingFlag) {
 					statusDiv.textContent = "Image and text processing stopped by user.";
+					unlockViewersAfterProcess();
 					setButtonState("imageLoaded");
 				} else {
+					unlockViewersAfterProcess();
 					setButtonState("imageLoaded");
 					displayErrorPopup("Pipeline Processing Fatal Exception", e.message, e.stack);
 				}

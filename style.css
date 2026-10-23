@@ -938,3 +938,39 @@ input[type="file"] {
 	display: block;
 	margin-top: 2px;
 }
+
+
+/* Show/hide image + text review viewers (no border-radius) */
+.viewer-controls {
+	margin: 12px 0 10px;
+	padding: 10px 12px;
+	border: 1px dashed var(--border-color, #383e5a);
+	border-radius: 0;
+	background: var(--panel-bg, #1f2335);
+}
+.viewer-controls .viewer-toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 4px 0;
+	cursor: pointer;
+	user-select: none;
+	border-radius: 0;
+}
+.viewer-controls .viewer-toggle input {
+	accent-color: var(--accent-color, #7aa2f7);
+	border-radius: 0;
+}
+.viewer-controls .viewer-toggle input:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+.viewer-controls .viewer-toggle-hint {
+	display: block;
+	margin-top: 6px;
+	opacity: 0.75;
+	font-size: 12px;
+}
+.image-preview-container.is-visible {
+	display: block;
+}
