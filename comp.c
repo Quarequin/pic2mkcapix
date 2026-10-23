@@ -1,7 +1,11 @@
 //comp/core/quantizer.c
 #include <stdint.h>
 
-/* comp_process returns a byte-sized status code; 0 means success. */
+/*
+ * comp_process returns a byte-sized status code; 0 means success.
+ * The host must place every buffer at or above comp_heap_base(): the area
+ * below it holds the static Bayer/Blue Noise tables and the C stack.
+ */
 enum {
 	COMP_OK = 0,
 	COMP_INVALID_ARGUMENT = 1,
@@ -167,27 +171,41 @@ static void add_error(int32_t *errors, uint32_t index, int value, uint32_t weigh
 	errors[index] += (value * (int)weight) / 16;
 }
 
+/* Centered ordered-dither threshold aligned with WebGL:
+ *   factor = value / levels - 0.5
+ *   delta  = factor * amplitude
+ * Bayer levels are n² (16/64/256), not (n²-1).
+ */
 static int ordered_delta(uint32_t mode, uint32_t x, uint32_t y) {
 	const uint16_t *matrix = 0;
-	uint32_t size = 0, maximum = 0;
+	uint32_t size = 0, levels = 0;
+	int amplitude = 0;
 	switch (mode) {
-		case 1: matrix = BAYER4_SRC; size = 4; maximum = 15; break;
-		case 2: matrix = BAYER8_SRC; size = 8; maximum = 63; break;
-		case 3: matrix = BAYER16_SRC; size = 16; maximum = 255; break;
-		case 4: matrix = BLUE8_SRC; size = 8; maximum = 255; break;
-		case 5: matrix = BLUE16_SRC; size = 16; maximum = 255; break;
-		case 6: matrix = BLUE32_SRC; size = 32; maximum = 255; break;
+		case 1: matrix = BAYER4_SRC; size = 4; levels = 16; amplitude = 112; break;
+		case 2: matrix = BAYER8_SRC; size = 8; levels = 64; amplitude = 128; break;
+		case 3: matrix = BAYER16_SRC; size = 16; levels = 256; amplitude = 144; break;
+		case 4: matrix = BLUE8_SRC; size = 8; levels = 256; amplitude = 112; break;
+		case 5: matrix = BLUE16_SRC; size = 16; levels = 256; amplitude = 128; break;
+		case 6: matrix = BLUE32_SRC; size = 32; levels = 256; amplitude = 144; break;
 		default: return 0;
 	}
 	const uint32_t value = matrix[(y % size) * size + (x % size)];
-	return (int)((value * 255U) / maximum) / 2 - 64;
+	/* (value / levels - 0.5) * amplitude  in integer math */
+	return (int)((amplitude * value) / levels) - (amplitude / 2);
+}
+
+extern unsigned char __heap_base;
+
+/* First byte the host may use; static data and the stack end below it. */
+uint32_t comp_heap_base(void) {
+	return (uint32_t)(uintptr_t)&__heap_base;
 }
 
 /* mode: 0 solid, 1-3 Bayer 4/8/16, 4-6 Blue Noise 8/16/32, 7 Error Diffusion. */
 uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 	uint32_t width, uint32_t height, uint32_t palette_count, uint32_t mode,
 	uint32_t error_ptr, uint32_t memory_bytes) {
-	if (!src_ptr || !palette_ptr || !out_ptr || !width || !height || !palette_count || palette_count > 65535U)
+	if (!src_ptr || !palette_ptr || !out_ptr || !width || !height || !palette_count || palette_count > 65536U)
 		return COMP_INVALID_ARGUMENT;
 	const uint64_t source_bytes = (uint64_t)width * height * 4U;
 	const uint64_t output_bytes = (uint64_t)width * height * 2U;
@@ -212,21 +230,35 @@ uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 		int32_t *current = errors + ((y & 1U) * row_bytes);
 		int32_t *next = errors + (((y + 1U) & 1U) * row_bytes);
 		if (mode == 7U) for (uint32_t i = 0; i < row_bytes; ++i) next[i] = 0;
+		/* Serpentine residual for ordered modes (matches WebGL/Script 0.6 carry). */
+		int residual_r = 0, residual_g = 0, residual_b = 0;
 		for (uint32_t x = 0; x < width; ++x) {
 			const uint32_t pixel = y * width + x;
 			const uint8_t *rgba = src + pixel * 4U;
-			if (rgba[3] < 128U) { out[pixel] = 0; continue; }
+			if (rgba[3] < 128U) {
+				out[pixel] = 0;
+				residual_r = residual_g = residual_b = 0;
+				continue;
+			}
 			int r = rgba[0], g = rgba[1], b = rgba[2];
 			if (mode >= 1U && mode <= 6U) {
 				const int delta = ordered_delta(mode, x, y);
-				r = clamp_byte(r + delta); g = clamp_byte(g + delta); b = clamp_byte(b + delta);
+				r = clamp_byte(r + residual_r + delta);
+				g = clamp_byte(g + residual_g + delta);
+				b = clamp_byte(b + residual_b + delta);
 			} else if (mode == 7U) {
 				const uint32_t offset = x * 3U;
 				r = clamp_byte(r + current[offset]); g = clamp_byte(g + current[offset + 1U]); b = clamp_byte(b + current[offset + 2U]);
 			}
 			const uint32_t selected = nearest_palette(palette, palette_count, r, g, b);
 			out[pixel] = (uint16_t)selected;
-			if (mode == 7U) {
+			if (mode >= 1U && mode <= 6U) {
+				const uint8_t *color = palette + selected * 4U;
+				/* 0.6 residual ≈ 3/5 */
+				residual_r = ((r - (int)color[0]) * 3) / 5;
+				residual_g = ((g - (int)color[1]) * 3) / 5;
+				residual_b = ((b - (int)color[2]) * 3) / 5;
+			} else if (mode == 7U) {
 				const uint8_t *color = palette + selected * 4U;
 				const int er = r - color[0], eg = g - color[1], eb = b - color[2];
 				const uint32_t offset = x * 3U;

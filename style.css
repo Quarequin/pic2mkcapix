@@ -908,3 +908,33 @@ input[type="file"] {
 	color: var(--accent-color);
 }
 
+
+
+/* Custom (2^n)×(2^n) tiled — range slider (avoids number-input page scroll traps) */
+.tile-power-slider-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 6px 0 4px;
+	max-width: 320px;
+}
+.tile-power-slider-row .tile-power-min,
+.tile-power-slider-row .tile-power-max {
+	font-family: var(--main-mono-font, monospace);
+	font-size: 12px;
+	color: var(--text-color, #a9b1d6);
+	opacity: 0.75;
+	min-width: 1.5em;
+	text-align: center;
+}
+.tile-power-slider {
+	flex: 1 1 auto;
+	width: 100%;
+	min-width: 0;
+	accent-color: var(--accent-color, #7aa2f7);
+	cursor: pointer;
+}
+#render-tile-size-label {
+	display: block;
+	margin-top: 2px;
+}
