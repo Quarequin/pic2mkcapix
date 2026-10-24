@@ -171,25 +171,61 @@ static void add_error(int32_t *errors, uint32_t index, int value, uint32_t weigh
 	errors[index] += (value * (int)weight) / 16;
 }
 
+/* Host-provided blue-noise maps for modes 8/9/10 (64/128/256). */
+static const uint8_t *host_blue_matrix = 0;
+static uint32_t host_blue_size = 0;
+
 /* Centered ordered-dither threshold aligned with WebGL:
  *   factor = value / levels - 0.5
  *   delta  = factor * amplitude
  * Bayer levels are n² (16/64/256), not (n²-1).
+ * Modes 8–10 read an 8-bit matrix the host copied into linear memory.
  */
 static int ordered_delta(uint32_t mode, uint32_t x, uint32_t y) {
-	const uint16_t *matrix = 0;
 	uint32_t size = 0, levels = 0;
 	int amplitude = 0;
+	uint32_t value = 0;
 	switch (mode) {
-		case 1: matrix = BAYER4_SRC; size = 4; levels = 16; amplitude = 112; break;
-		case 2: matrix = BAYER8_SRC; size = 8; levels = 64; amplitude = 128; break;
-		case 3: matrix = BAYER16_SRC; size = 16; levels = 256; amplitude = 144; break;
-		case 4: matrix = BLUE8_SRC; size = 8; levels = 256; amplitude = 112; break;
-		case 5: matrix = BLUE16_SRC; size = 16; levels = 256; amplitude = 128; break;
-		case 6: matrix = BLUE32_SRC; size = 32; levels = 256; amplitude = 144; break;
+		case 1: {
+			size = 4; levels = 16; amplitude = 112;
+			value = BAYER4_SRC[(y % size) * size + (x % size)];
+			break;
+		}
+		case 2: {
+			size = 8; levels = 64; amplitude = 128;
+			value = BAYER8_SRC[(y % size) * size + (x % size)];
+			break;
+		}
+		case 3: {
+			size = 16; levels = 256; amplitude = 144;
+			value = BAYER16_SRC[(y % size) * size + (x % size)];
+			break;
+		}
+		case 4: {
+			size = 8; levels = 256; amplitude = 112;
+			value = BLUE8_SRC[(y % size) * size + (x % size)];
+			break;
+		}
+		case 5: {
+			size = 16; levels = 256; amplitude = 128;
+			value = BLUE16_SRC[(y % size) * size + (x % size)];
+			break;
+		}
+		case 6: {
+			size = 32; levels = 256; amplitude = 144;
+			value = BLUE32_SRC[(y % size) * size + (x % size)];
+			break;
+		}
+		case 8: case 9: case 10: {
+			if (!host_blue_matrix || !host_blue_size) return 0;
+			size = host_blue_size;
+			levels = 256;
+			amplitude = mode == 8 ? 152 : mode == 9 ? 160 : 168;
+			value = host_blue_matrix[(y % size) * size + (x % size)];
+			break;
+		}
 		default: return 0;
 	}
-	const uint32_t value = matrix[(y % size) * size + (x % size)];
 	/* (value / levels - 0.5) * amplitude  in integer math */
 	return (int)((amplitude * value) / levels) - (amplitude / 2);
 }
@@ -201,7 +237,7 @@ uint32_t comp_heap_base(void) {
 	return (uint32_t)(uintptr_t)&__heap_base;
 }
 
-/* mode: 0 solid, 1-3 Bayer 4/8/16, 4-6 Blue Noise 8/16/32, 7 Error Diffusion. */
+/* mode: 0 solid, 1-3 Bayer, 4-6 Blue 8/16/32, 7 Floyd, 8-10 Blue 64/128/256 (host matrix via error_ptr). */
 uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 	uint32_t width, uint32_t height, uint32_t palette_count, uint32_t mode,
 	uint32_t error_ptr, uint32_t memory_bytes) {
@@ -212,8 +248,17 @@ uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 	const uint64_t error_bytes = (uint64_t)width * 3U * 2U * sizeof(int32_t);
 	if (source_bytes > 0xffffffffULL || output_bytes > 0xffffffffULL || error_bytes > 0xffffffffULL)
 		return COMP_DIMENSION_OVERFLOW;
-	if (mode > 7U)
+	if (mode > 10U)
 		return COMP_UNSUPPORTED_MODE;
+	host_blue_matrix = 0;
+	host_blue_size = 0;
+	if (mode >= 8U && mode <= 10U) {
+		host_blue_size = mode == 8U ? 64U : mode == 9U ? 128U : 256U;
+		if (!error_ptr) return COMP_MISSING_ERROR_BUFFER;
+		if ((uint64_t)error_ptr + (uint64_t)host_blue_size * host_blue_size > memory_bytes)
+			return COMP_MEMORY_RANGE;
+		host_blue_matrix = (const uint8_t *)(uintptr_t)error_ptr;
+	}
 	if ((uint64_t)src_ptr + source_bytes > memory_bytes ||
 		(uint64_t)palette_ptr + (uint64_t)palette_count * 4U > memory_bytes ||
 		(uint64_t)out_ptr + output_bytes > memory_bytes ||
@@ -241,7 +286,7 @@ uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 				continue;
 			}
 			int r = rgba[0], g = rgba[1], b = rgba[2];
-			if (mode >= 1U && mode <= 6U) {
+			if ((mode >= 1U && mode <= 6U) || (mode >= 8U && mode <= 10U)) {
 				const int delta = ordered_delta(mode, x, y);
 				r = clamp_byte(r + residual_r + delta);
 				g = clamp_byte(g + residual_g + delta);
@@ -252,7 +297,7 @@ uint32_t comp_process(uint32_t src_ptr, uint32_t palette_ptr, uint32_t out_ptr,
 			}
 			const uint32_t selected = nearest_palette(palette, palette_count, r, g, b);
 			out[pixel] = (uint16_t)selected;
-			if (mode >= 1U && mode <= 6U) {
+			if ((mode >= 1U && mode <= 6U) || (mode >= 8U && mode <= 10U)) {
 				const uint8_t *color = palette + selected * 4U;
 				/* 0.6 residual ≈ 3/5 */
 				residual_r = ((r - (int)color[0]) * 3) / 5;

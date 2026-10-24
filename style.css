@@ -3,7 +3,9 @@
 
 @font-face {
 	font-family: -user-djvumono-woff2;
-	src: url('djvumono.woff2') format('woff2');
+	src:
+		url('djvumono.woff2') format('woff2'),
+		url('djvumono.ttf') format('truetype');
 	font-weight: normal;
 	font-style: normal;
 }

@@ -14,11 +14,11 @@
  *   //script/main.js              – UI, palette manager, conversion pipeline
  *
  * Humanization notes:
- *   - CPU quantizer (nearest color, ordered dither, Floyd–Steinberg, ASCII
- *     row builders) rewritten with descriptive parameter names
- *   - runTileCore expanded from dense ternary dispatch to clear branches
- *   - Section markers, tab indentation, and public behaviour preserved
- *   - Large blue-noise maps remain base64-decoded constants (data, not logic)
+ *   - CPU quantizer + runTileCore use clear names and tab indent
+ *   - WebGL GLSL (vertex / solid / Bayer / blue-noise) is tab-indented source
+ *   - GLEngine methods use short readable names; GPU_SPREAD holds u_spread
+ *   - Bayer U8 maps via matrixToU8(); blue-noise stays base64 blobs
+ *   - Section markers and behaviour preserved
  */
 
 //script/init/htm.js
@@ -718,20 +718,22 @@ const CHAR_TABLE = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 	BLUE8 = new Uint8Array(BLUE8_SRC),
 	BLUE16 = new Uint8Array(BLUE16_SRC),
 	BLUE32 = new Uint8Array(BLUE32_SRC),
-	QUAD_VERTICES = new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]),
-	BAYER4_F32 = new Float32Array(BAYER4_SRC.map((e) => e / 16)),
-	BAYER8_F32 = new Float32Array(BAYER8_SRC.map((e) => e / 64)),
-	BAYER16_F32 = new Float32Array(BAYER16_SRC.map((e) => e / 256));
+	// Full-screen quad: x,y,u,v per vertex (TRIANGLE_STRIP)
+	QUAD_VERTICES = new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]);
 
-function _floatMatrixToU8(e) {
-	const t = new Uint8Array(e.length);
-	for (let a = 0; a < e.length; a++) t[a] = Math.round(255 * e[a]);
-	return t;
+/** Scale integer Bayer ranks 0..levels-1 into 0..255 for WebGL LUMINANCE textures. */
+function matrixToU8(src, levels) {
+	const out = new Uint8Array(src.length);
+	for (let i = 0; i < src.length; i += 1) {
+		out[i] = Math.round((255 * src[i]) / levels);
+	}
+	return out;
 }
 
-const BAYER4_U8 = _floatMatrixToU8(BAYER4_F32),
-	BAYER8_U8 = _floatMatrixToU8(BAYER8_F32),
-	BAYER16_U8 = _floatMatrixToU8(BAYER16_F32),
+const BAYER4_U8 = matrixToU8(BAYER4_SRC, 16),
+	BAYER8_U8 = matrixToU8(BAYER8_SRC, 64),
+	BAYER16_U8 = matrixToU8(BAYER16_SRC, 256),
+	// Blue-noise tables are already 0..255 ranks
 	BLUE8_U8 = new Uint8Array(BLUE8_SRC),
 	BLUE16_U8 = new Uint8Array(BLUE16_SRC),
 	BLUE32_U8 = new Uint8Array(BLUE32_SRC),
@@ -1450,7 +1452,7 @@ function createDitheringBuffer(data) {
 	return new Uint8ClampedArray(data);
 }
 
-const WASM_PIPELINE_BASE64 = "AGFzbQEAAAABGQNgA39/fwF/YAABf2AJf39/f39/f39/AX8DBAMAAQIFAwEAAgYIAX8BQaCiBAsHKgMGbWVtb3J5AgAOY29tcF9oZWFwX2Jhc2UAAQxjb21wX3Byb2Nlc3MAAgq1DQO1AQEDfwJAIAJFDQAgAkEHcSEDQQAhBAJAIAJBCEkNACACQXhxIQVBACEEA0AgACAEaiICIAE6AAAgAkEHaiABOgAAIAJBBmogAToAACACQQVqIAE6AAAgAkEEaiABOgAAIAJBA2ogAToAACACQQJqIAE6AAAgAkEBaiABOgAAIAUgBEEIaiIERw0ACwsgA0UNACAAIARqIQIDQCACIAE6AAAgAkEBaiECIANBf2oiAw0ACwsgAAsIAEGgooSAAAvyCwMBfwN+Hn9BASEJAkAgAEUNACABRQ0AIAJFDQAgA0UNACAERQ0AIAVBf2pB//8DSw0AQQUhCSADQarVqtUASw0AIAStIAOtIgp+IgtCAoYiDCALQgGGIguEQv////8PVg0AQQQhCSAGQQdLDQBBAyEJIAwgAK18IAitIgxWDQAgBa1CAoYgAa18IAxWDQAgCyACrXwgDFYNAAJAIAZBB0cNACAKQhh+IAetfCAMVg0BAkAgBw0AQQIhCQwCCyAHQQAgA0EYbBCAgICAABoLIANBDGwhDSADQQNsIQ4gBkEHRyEPQQAhEANAIAdBACAOIBBBAXEiCRtBAnRqIREgB0EAIAlrIA5xQQJ0aiESAkAgDw0AIBFBACANEICAgIAAGgsgEEEBaiETIBFBFGohFCARQRBqIRUgEUEMaiEWIBFBCGohFyARQQRqIRggEUF8aiEZIBFBeGohGiARQXRqIRsgEkEUaiEcIBJBEGohHSASQQxqIR4gECADbCEfQQAhIEEAISFBACEiQQAhIwNAAkACQCAAICMgH2oiJEECdGoiCSwAA0EASA0AQQAhIiACICRBAXRqQQA7AQBBACEhQQAhIAwBCyAJLQACISUgCS0AASEmIAktAAAhJ0HwACEIQRAhKEEEIQlBgIiAgAAhKQJAAkACQAJAAkACQAJAAkAgBg4IBgUAAQIDBAYGC0GAASEIQcAAIShBCCEJQaCIgIAAISkMBAtBkAEhCEGAAiEoQRAhCUGgiYCAACEpDAMLQYACIShBCCEJQaCNgIAAISkMAgtBgAEhCEGAAiEoQRAhCUGgjoCAACEpDAELQZABIQhBgAIhKEEgIQlBoJKAgAAhKQsgIiAlaiAIICkgCUF/aiIqIBBxIAlsICogI3FqQQF0ai8BAGwgKG4gCEEBdmsiCWoiCEH/ASAIQf8BSBsiCEEAIAhBAEobISUgISAmaiAJaiIIQf8BIAhB/wFIGyIIQQAgCEEAShshJiAgICdqIAlqIglB/wEgCUH/AUgbIglBACAJQQBKGyEnDAELIA8NACASICNBDGxqIgkoAgAgJ2oiCEH/ASAIQf8BSBsiCEEAIAhBAEobIScgCUEIaigCACAlaiIIQf8BIAhB/wFIGyIIQQAgCEEAShshJSAJQQRqKAIAICZqIglB/wEgCUH/AUgbIglBACAJQQBKGyEmC0F/IShBACEpIAEhCUEAIQgDQAJAIAlBA2osAABBf0oNACAmIAlBAWotAABrIiogKmwgJyAJLQAAayIqICpsaiAlIAlBAmotAABrIiogKmxqIiogKCAqIChJIiobISggCCApICobISkLIAlBBGohCSAFIAhBAWoiCEcNAAsgAiAkQQF0aiApOwEAAkACQCAGDggBAAAAAAAAAQALICUgASApQQJ0aiIJLQACa0EDbEEFbSEiICYgCS0AAWtBA2xBBW0hISAnIAktAABrQQNsQQVtISAMAQsgDw0AICNBA2whKiAlIAEgKUECdGoiCS0AAmshCCAmIAktAAFrISggJyAJLQAAayEJAkAgI0EBaiADTyIlDQAgHiAqQQJ0IilqIiYgJigCACAJQQdsQRBtajYCACAdIClqIiYgJigCACAoQQdsQRBtajYCACAcIClqIikgKSgCACAIQQdsQRBtajYCAAsgEyAETw0AAkAgI0UNACAbICpBAnQiKWoiJiAmKAIAIAlBA2xBEG1qNgIAIBogKWoiJiAmKAIAIChBA2xBEG1qNgIAIBkgKWoiKSApKAIAIAhBA2xBEG1qNgIACyARICpBAnQiKWoiKiAqKAIAIAlBBWxBEG1qNgIAIBggKWoiKiAqKAIAIChBBWxBEG1qNgIAIBcgKWoiKiAqKAIAIAhBBWxBEG1qNgIAICUNACAWIClqIiogKigCACAJQRBtajYCACAVIClqIgkgCSgCACAoQRBtajYCACAUIClqIgkgCSgCACAIQRBtajYCAAsgI0EBaiIjIANHDQALQQAhCSATIRAgEyAERw0ACwsgCQsLqBoBAEGACAugGgAACAACAAoADAAEAA4ABgADAAsAAQAJAA8ABwANAAUAAAAgAAgAKAACACIACgAqADAAEAA4ABgAMgASADoAGgAMACwABAAkAA4ALgAGACYAPAAcADQAFAA+AB4ANgAWAAMAIwALACsAAQAhAAkAKQAzABMAOwAbADEAEQA5ABkADwAvAAcAJwANAC0ABQAlAD8AHwA3ABcAPQAdADUAFQAAAIAAIACgAAgAiAAoAKgAAgCCACIAogAKAIoAKgCqAMAAQADgAGAAyABIAOgAaADCAEIA4gBiAMoASgDqAGoAMACwABAAkAA4ALgAGACYADIAsgASAJIAOgC6ABoAmgDwAHAA0ABQAPgAeADYAFgA8gByANIAUgD6AHoA2gBaAAwAjAAsAKwABACEACQApAAOAI4ALgCuAAYAhgAmAKYAzABMAOwAbADEAEQA5ABkAM4ATgDuAG4AxgBGAOYAZgA8ALwAHACcADQAtAAUAJQAPgC+AB4AngA2ALYAFgCWAPwAfADcAFwA9AB0ANQAVAD+AH4A3gBeAPYAdgDWAFYAAwCDACMAowALAIsAKwCrAAEAgQAhAKEACQCJACkAqQDDAEMA4wBjAMsASwDrAGsAwQBBAOEAYQDJAEkA6QBpADMAswATAJMAOwC7ABsAmwAxALEAEQCRADkAuQAZAJkA8wBzANMAUwD7AHsA2wBbAPEAcQDRAFEA+QB5ANkAWQAPAI8ALwCvAAcAhwAnAKcADQCNAC0ArQAFAIUAJQClAM8ATwDvAG8AxwBHAOcAZwDNAE0A7QBtAMUARQDlAGUAPwC/AB8AnwA3ALcAFwCXAD0AvQAdAJ0ANQC1ABUAlQD/AH8A3wBfAPcAdwDXAFcA/QB9AN0AXQD1AHUA1QBVAI0AugCVADQAZQC2AIkAaQCqAHEAzgAUAPIAmQDKAPYAQADeAFAAIAB1AAwAWQAoABAAMAChANIAsgA8ABgAAADmAF0A+gCRAEgA6gC+AG0AOAAEAHkAxgCdAH0AJADWAEQACAAsAK4AhQD/AFUAHADiAGEA7gBMANoAgQDCAKUA4wCNAIEA7ACgAIYARwAeAKIA6wBjANEAbADAAF4AmwBOAL4AmQA1AFYA4ACyAJQAXQAqALcAkAAaAEkACgApAIsAAwD4AHMAyAANAD8A+QCqAH4A1QA4AKYA6AB2AMwAOwDcAKwAcAAhAJoA9QBYAMMADgAwAGgAuQAGAJYAUACDAPEAYAAVALQARgCJABYA7QBUACYAygABAEMA3gB6APwALgCkAIAA/wBrADQAvwCPANoACwCeAFsAsAAoAM8AEQBuAEoA6QAtAMYAGQB4ADwA9wBlAB0AhgAyAPAAqABSAMUABQC7AJ8ATQDUACMArQAIAHIARQDiAJMAEwBeAOoAiAA6ALUADgBcAPoALADTAIQANgDBAAwAVgDfAGkAMQCrAG0AHADzAH0ARACcAAQAtgBhACQA/gCXAEAA2AC9AB8A7gBTAKcALwDOAHQA9AARAJIATwDHACoAdQDmAAIAoQBkABMAjADdADkAuQBmAEgA1wAKAH8A/QBZALIASwDQACsA+wBvAAYAowAiALwAgQA9AO8AGAClADcAxACRABsAfABfAOYAmABRAPYADwBxADAArwDMACUAjgAJANsAQgDCABIATACHABcAagDnADMAtwAHAHkA9wBnANYAPgCpAAAAlQDSAFcAyQAnAKgAYgAhAJ4AFADkAI0AuACaALUAKgAUAE8AIgBtABIAXwCHAL4AVADKAIAAvgBEACIAAQAXAFQA7QBGAOEAkADtAKUAMQBmAO0AbQC6AEYACQB0ANwA+ACjAP0AkwDUADcA9QAOAKcAJgA5AAsA6QCYAMUAiwCuADYAegAOAFwAPwANAMUAtAAaAI4AOwDZAIMAzABYADQAiQBlABwAwgDmAHcAsAD0AGAA1gCcAC4AbwBRANsAIADxAKAAzgCEAOMAeAD7AFkAwgAFAGcAqAAkAK0ADwDlAEAAuQDvAEkABAAyABUAfgAjAE4AvwCKABwAlQBAAHEAEQBIACYAsQAwAJsAIQBDANoAoQBOABUA8wBpAMcAOgDeAAwAngBbAKkAyQCPADsA+QARAGoA3wC2AF8A7AAGAJcAZADTAAoAUwDJAHsA8gAMAIUA5gAvAFAAKQD6AHwAJwCrADAAhgD/AG4AUgC8ACgAgQBHAMMANQCkABQAfwC9ACwAiAD+AB0ArAA0AGsAuwBeABkA0QDYAJEAGwC3AGAA6wBNABMAPQDiAJcACACmAF0A9wAfAHMASwDGADoA6ABRABMAdQDfACkAngBMAP8AOQCWAHIAPgDoAHAABwDVADUAjQDLAH0AJQBoAMUAMQCzAA0AVQDwAC4AggDzAA8AqQA+AJIAYAC1AAgAxwAjAH4AzQBYAK8AAgDBAEIAnAAeAGYA9wBWAK0AFQBEAJ0A3QBsAMIAPACZAAsAVwC4AIAA7AAzAIYA3ABFAJQA8gAQACwAswB2AOUALwCLAAsA4ABDALUAKgD6AJEAIQBUAAYA7gBKAKUAZQDZACsAYwAYAKMATwALAPwAagAfAKsAUwDFAHkANgChAGQA/wBKAL0AdAAFAJ8AYQA2ANIAfwAtAKEAHQDUADgAjAC/AEYA0AAtAL4AkwA8ALcA4AA3AIwACgDsAM8AFwCEAFEA1gAuAJgA5wATAIgATQC6AP0AdgDLADQAIgB7AOIABQCbACUAcgDqABwAXwDXACgAgQD5AEgApQAmALsADgCsADwAgQD1AGwAPwDMABwAXACQAEMADACwAPcAWwAwAKoAZgD6AFQABgCtAIMAMwDHABYAaAC8ADUAjwBEAOQAXQDJACYAEQBOAKgAcQDyADgAuQDmAFkAKQCeABYAhwA7ANoAjQDBAHoAOQD2AG4AUACaACUA5wBiAPsAegAxAMMACACmANwALACJAAIASwCVABcAaQD+AJMATgDMACEAdAA/ALQAHQCfAGQAFQCkAOsAMADVAHUABwAQALEAagAiAJ0AVQA2AMAAdQDqACsAogDGAD0AgAATALsAMQDhAF4A1QAuAH4AzQBJAJEAHgBwAL8APgCIANsAtgBBAPAADQBvAMsAGgBbAA4AswBlACYAUQCsADgA3QAOAKgATQCXACMAbAD0ABEAnABYAM8AKgB9AP4AFABgACwA0QB8ADIArQAHAJQAPwD2AHgANQDRABwAjwBfACIAwABzADoA5gAMALkARwCKADIA8QCpABwAtQBKAJ8ALgDpABwAngBWAMUAJADhAIMASAATAKAA9wBuAEAAuwD8AGoALADHAFIApwA2ANsAYQAKAMQAeQBAAOkACACPAG8AZgA3AOwAEwCNAPoAXgArALwAUwDmAA8ATACbACoAgABJAKEAGwBxAO0AgQAgALAAVQDaAC8AmQBmAMIAOQD4AKcATgDZADwAIABzALEAOQDMAIYAMACrAN4ACQDGAD0A1gCIAF0AtQAUAD8AlgDyACYAfwD/AEYAiQAdAOIAVAANAMIAbgCTAOUARAAVAKUAZAAmAHQAwwA0AIwAGABTAC8ArAAmAPgAaQDIAFkAGQCuADoA0wBfABMApgAzAHsAkQAqAP8AXAAFALcAbQDtAE8AmwD9AEUAowDtAHUALQCcAB0AdwBEANYAMACFAD0A3gCRACMAvQD1AGwAyABLACMArABPABUAoQA2AIAALgDWAAwAWACSAB8AZgC9AP4AYQC4ADQA4wALAKMATgDsAGcAHgCYAFEAEQCEAD4A7gDMAHYANQDGAHEA9AAhAL8AmABDALQAKQDPAEoAiAAVADwAjQD5ABAAXgCAACwAvwA4ANwAgADCAFoA9wArAJwACwDmAI0AJQBWABIAnABgABkAewDJADoAlQDoADkApgDNAE8AIgB1AK0ANwDSAHsApwAMAEcAuQA2AHQAywAfAGMAQAC9APYAqQBMANIAiwDeADEAVQCtACgAcwD9AFgALgCXAN8APgCLAAIAUACeAOUAYQCSACYA2wCxAAkARACYABkAawAOADoAwQAtAOsAogBqACUAmgD1ABIAgwBIALoAZQA2AMEAHABzAO0AMQB+ANUAQQD7AIUAKABfALYA2wBSAK8AgADnAAMAeABHAA4AxwB+AD0AYACzACsA0gCBABEApABYAM4ARgCYACIAtQA5AHAAHQCeAOAATQCQADAAyQAoAFsApQCGADMAuwD6AFwAkAAcAEQAlwDqADkA8gB9AEkAwwAqAIEA3wBbABQAigD2AFQAvwA1AHkAAAB0ADgA1QAeAJUAUADNAG4ANQCoACMAcQDKAFQAEwCgAGcAMADUACQAmgD3AEIArwBsACAAqgA/AOsAkwAaAMYAQwC0AAwA8QBoAOIAPwATAI8A2gBMALcALwCEAPsAXwAmAKsAOwCMANoAZQAtAIUA8QCbAFcAxwAsAG4AswD6AABaBG5hbWUACgljb21wLndhc20BJwMABm1lbXNldAEOY29tcF9oZWFwX2Jhc2UCDGNvbXBfcHJvY2VzcwcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhAH8JcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBBWNsYW5nXzE4LjEuMi13YXNpLXNkayAoaHR0cHM6Ly9naXRodWIuY29tL2xsdm0vbGx2bS1wcm9qZWN0IDI2YTFkNjYwMWQ3MjdhOTZmNDMwMWQwZDg2NDdiNWE0Mjc2MGFlMGMpACwPdGFyZ2V0X2ZlYXR1cmVzAisPbXV0YWJsZS1nbG9iYWxzKwhzaWduLWV4dA==";
+const WASM_PIPELINE_BASE64 = "AGFzbQEAAAABGQNgA39/fwF/YAABf2AJf39/f39/f39/AX8DBAMAAQIFAwEAAgYIAX8BQaCiBAsHKgMGbWVtb3J5AgAOY29tcF9oZWFwX2Jhc2UAAQxjb21wX3Byb2Nlc3MAAgrKDwO1AQEDfwJAIAJFDQAgAkEHcSEDQQAhBAJAIAJBCEkNACACQXhxIQVBACEEA0AgACAEaiICIAE6AAAgAkEHaiABOgAAIAJBBmogAToAACACQQVqIAE6AAAgAkEEaiABOgAAIAJBA2ogAToAACACQQJqIAE6AAAgAkEBaiABOgAAIAUgBEEIaiIERw0ACwsgA0UNACAAIARqIQIDQCACIAE6AAAgAkEBaiECIANBf2oiAw0ACwsgAAsIAEGgooSAAAuHDgMBfwR+KH9BASEJAkAgAEUNACABRQ0AIAJFDQAgA0UNACAERQ0AIAVBf2pB//8DSw0AQQUhCSADQarVqtUASw0AIAStIAOtIgp+IgtCAoYiDCALQgGGIguEQv////8PVg0AQQQhCSAGQQpLDQACQAJAAkAgBkEHSw0AIAitIQ1BACEOQQAhDwwBCyAHRQ0BQQMhCUHAAEGAAUGAAiAGQQlGIhAbIAZBCEYiERsiDq1CBkIHQgggEBsgERuGIAetfCAIrSINVg0CIAchDwtBAyEJIAwgAK18IA1WDQEgBa1CAoYgAa18IA1WDQEgCyACrXwgDVYNAQJAIAZBB0cNACAKQhh+IAetfCANVg0CIAdFDQEgB0EAIANBGGwQgICAgAAaC0GYAUGgAUGoASAGQQlGGyAGQQhGGyESIA9BAEcgDkEAR3EhEyAGQQdLIAZBf2oiFEEGSXIhFSADQQxsIRYgA0EDbCEXQQAhGANAIAdBACAXIBhBAXEiCRtBAnRqIRkgB0EAIAlrIBdxQQJ0aiEaAkAgBkEHRyIbDQAgGUEAIBYQgICAgAAaCyAYQQFqIRwgGUEUaiEdIBlBEGohHiAZQQxqIR8gGUEIaiEgIBlBBGohISAZQXxqISIgGUF4aiEjIBlBdGohJCAaQRRqISUgGkEQaiEmIBpBDGohJyAYIANsISggGEECdEEMcSEpIBhBA3RBOHEhKiAYQQR0QfABcSErIBhBBXRB4AdxISxBACEtQQAhLkEAIS9BACEwA0ACQAJAIAAgMCAoaiIxQQJ0aiIJLAADQQBIDQBBACEvIAIgMUEBdGpBADsBAEEAIS5BACEtDAELIAktAAIhMiAJLQABITMgCS0AACE0AkACQAJAAkACQCAVRQ0AQQAhCQJAAkACQAJAAkACQAJAIBQOCgABAgMEBQoGBgYKCyAwQQNxIClyQQF0QYCIgIAAai8BACEIQfAAIQlBECEQDAgLIDBBB3EgKnJBAXRBoIiAgABqLwEAIQhBgAEhCUHAACEQDAcLIDBBD3EgK3JBAXRBoImAgABqLwEAIQgMBQsgMEEHcSAqckEBdEGgjYCAAGovAQAhCEHwACEJQYACIRAMBQsgMEEPcSArckEBdEGgjoCAAGovAQAhCEGAASEJQYACIRAMBAsgMEEfcSAsckEBdEGgkoCAAGovAQAhCAwCCyATRQ0DIA8gGCAOcCAObGogMCAOcGotAAAhCEGAAiEQIBIhCQwCCyAbDQMgGiAwQQxsaiIJKAIAIDRqIghB/wEgCEH/AUgbIghBACAIQQBKGyE0IAlBCGooAgAgMmoiCEH/ASAIQf8BSBsiCEEAIAhBAEobITIgCUEEaigCACAzaiIJQf8BIAlB/wFIGyIJQQAgCUEAShshMwwDC0GQASEJQYACIRALIAggCWwgEG4gCUEBdmshCQsgLyAyaiAJaiIIQf8BIAhB/wFIGyIIQQAgCEEAShshMiAuIDNqIAlqIghB/wEgCEH/AUgbIghBACAIQQBKGyEzIC0gNGogCWoiCUH/ASAJQf8BSBsiCUEAIAlBAEobITQLQX8hEEEAIREgASEJQQAhCANAAkAgCUEDaiwAAEF/Sg0AIDMgCUEBai0AAGsiNSA1bCA0IAktAABrIjUgNWxqIDIgCUECai0AAGsiNSA1bGoiNSAQIDUgEEkiNRshECAIIBEgNRshEQsgCUEEaiEJIAUgCEEBaiIIRw0ACyACIDFBAXRqIBE7AQACQCAVRQ0AIDIgASARQQJ0aiIJLQACa0EDbEEFbSEvIDMgCS0AAWtBA2xBBW0hLiA0IAktAABrQQNsQQVtIS0MAQsgGw0AIDBBA2whNSAyIAEgEUECdGoiCS0AAmshCCAzIAktAAFrIRAgNCAJLQAAayEJAkAgMEEBaiADTyIyDQAgJyA1QQJ0IhFqIjMgMygCACAJQQdsQRBtajYCACAmIBFqIjMgMygCACAQQQdsQRBtajYCACAlIBFqIhEgESgCACAIQQdsQRBtajYCAAsgHCAETw0AAkAgMEUNACAkIDVBAnQiEWoiMyAzKAIAIAlBA2xBEG1qNgIAICMgEWoiMyAzKAIAIBBBA2xBEG1qNgIAICIgEWoiESARKAIAIAhBA2xBEG1qNgIACyAZIDVBAnQiEWoiNSA1KAIAIAlBBWxBEG1qNgIAICEgEWoiNSA1KAIAIBBBBWxBEG1qNgIAICAgEWoiNSA1KAIAIAhBBWxBEG1qNgIAIDINACAfIBFqIjUgNSgCACAJQRBtajYCACAeIBFqIgkgCSgCACAQQRBtajYCACAdIBFqIgkgCSgCACAIQRBtajYCAAsgMEEBaiIwIANHDQALQQAhCSAcIRggHCAERg0CDAALC0ECIQkLIAkLC6gaAQBBgAgLoBoAAAgAAgAKAAwABAAOAAYAAwALAAEACQAPAAcADQAFAAAAIAAIACgAAgAiAAoAKgAwABAAOAAYADIAEgA6ABoADAAsAAQAJAAOAC4ABgAmADwAHAA0ABQAPgAeADYAFgADACMACwArAAEAIQAJACkAMwATADsAGwAxABEAOQAZAA8ALwAHACcADQAtAAUAJQA/AB8ANwAXAD0AHQA1ABUAAACAACAAoAAIAIgAKACoAAIAggAiAKIACgCKACoAqgDAAEAA4ABgAMgASADoAGgAwgBCAOIAYgDKAEoA6gBqADAAsAAQAJAAOAC4ABgAmAAyALIAEgCSADoAugAaAJoA8ABwANAAUAD4AHgA2ABYAPIAcgDSAFIA+gB6ANoAWgAMAIwALACsAAQAhAAkAKQADgCOAC4ArgAGAIYAJgCmAMwATADsAGwAxABEAOQAZADOAE4A7gBuAMYARgDmAGYAPAC8ABwAnAA0ALQAFACUAD4AvgAeAJ4ANgC2ABYAlgD8AHwA3ABcAPQAdADUAFQA/gB+AN4AXgD2AHYA1gBWAAMAgwAjAKMACwCLACsAqwABAIEAIQChAAkAiQApAKkAwwBDAOMAYwDLAEsA6wBrAMEAQQDhAGEAyQBJAOkAaQAzALMAEwCTADsAuwAbAJsAMQCxABEAkQA5ALkAGQCZAPMAcwDTAFMA+wB7ANsAWwDxAHEA0QBRAPkAeQDZAFkADwCPAC8ArwAHAIcAJwCnAA0AjQAtAK0ABQCFACUApQDPAE8A7wBvAMcARwDnAGcAzQBNAO0AbQDFAEUA5QBlAD8AvwAfAJ8ANwC3ABcAlwA9AL0AHQCdADUAtQAVAJUA/wB/AN8AXwD3AHcA1wBXAP0AfQDdAF0A9QB1ANUAVQCNALoAlQA0AGUAtgCJAGkAqgBxAM4AFADyAJkAygD2AEAA3gBQACAAdQAMAFkAKAAQADAAoQDSALIAPAAYAAAA5gBdAPoAkQBIAOoAvgBtADgABAB5AMYAnQB9ACQA1gBEAAgALACuAIUA/wBVABwA4gBhAO4ATADaAIEAwgClAOMAjQCBAOwAoACGAEcAHgCiAOsAYwDRAGwAwABeAJsATgC+AJkANQBWAOAAsgCUAF0AKgC3AJAAGgBJAAoAKQCLAAMA+ABzAMgADQA/APkAqgB+ANUAOACmAOgAdgDMADsA3ACsAHAAIQCaAPUAWADDAA4AMABoALkABgCWAFAAgwDxAGAAFQC0AEYAiQAWAO0AVAAmAMoAAQBDAN4AegD8AC4ApACAAP8AawA0AL8AjwDaAAsAngBbALAAKADPABEAbgBKAOkALQDGABkAeAA8APcAZQAdAIYAMgDwAKgAUgDFAAUAuwCfAE0A1AAjAK0ACAByAEUA4gCTABMAXgDqAIgAOgC1AA4AXAD6ACwA0wCEADYAwQAMAFYA3wBpADEAqwBtABwA8wB9AEQAnAAEALYAYQAkAP4AlwBAANgAvQAfAO4AUwCnAC8AzgB0APQAEQCSAE8AxwAqAHUA5gACAKEAZAATAIwA3QA5ALkAZgBIANcACgB/AP0AWQCyAEsA0AArAPsAbwAGAKMAIgC8AIEAPQDvABgApQA3AMQAkQAbAHwAXwDmAJgAUQD2AA8AcQAwAK8AzAAlAI4ACQDbAEIAwgASAEwAhwAXAGoA5wAzALcABwB5APcAZwDWAD4AqQAAAJUA0gBXAMkAJwCoAGIAIQCeABQA5ACNALgAmgC1ACoAFABPACIAbQASAF8AhwC+AFQAygCAAL4ARAAiAAEAFwBUAO0ARgDhAJAA7QClADEAZgDtAG0AugBGAAkAdADcAPgAowD9AJMA1AA3APUADgCnACYAOQALAOkAmADFAIsArgA2AHoADgBcAD8ADQDFALQAGgCOADsA2QCDAMwAWAA0AIkAZQAcAMIA5gB3ALAA9ABgANYAnAAuAG8AUQDbACAA8QCgAM4AhADjAHgA+wBZAMIABQBnAKgAJACtAA8A5QBAALkA7wBJAAQAMgAVAH4AIwBOAL8AigAcAJUAQABxABEASAAmALEAMACbACEAQwDaAKEATgAVAPMAaQDHADoA3gAMAJ4AWwCpAMkAjwA7APkAEQBqAN8AtgBfAOwABgCXAGQA0wAKAFMAyQB7APIADACFAOYALwBQACkA+gB8ACcAqwAwAIYA/wBuAFIAvAAoAIEARwDDADUApAAUAH8AvQAsAIgA/gAdAKwANABrALsAXgAZANEA2ACRABsAtwBgAOsATQATAD0A4gCXAAgApgBdAPcAHwBzAEsAxgA6AOgAUQATAHUA3wApAJ4ATAD/ADkAlgByAD4A6ABwAAcA1QA1AI0AywB9ACUAaADFADEAswANAFUA8AAuAIIA8wAPAKkAPgCSAGAAtQAIAMcAIwB+AM0AWACvAAIAwQBCAJwAHgBmAPcAVgCtABUARACdAN0AbADCADwAmQALAFcAuACAAOwAMwCGANwARQCUAPIAEAAsALMAdgDlAC8AiwALAOAAQwC1ACoA+gCRACEAVAAGAO4ASgClAGUA2QArAGMAGACjAE8ACwD8AGoAHwCrAFMAxQB5ADYAoQBkAP8ASgC9AHQABQCfAGEANgDSAH8ALQChAB0A1AA4AIwAvwBGANAALQC+AJMAPAC3AOAANwCMAAoA7ADPABcAhABRANYALgCYAOcAEwCIAE0AugD9AHYAywA0ACIAewDiAAUAmwAlAHIA6gAcAF8A1wAoAIEA+QBIAKUAJgC7AA4ArAA8AIEA9QBsAD8AzAAcAFwAkABDAAwAsAD3AFsAMACqAGYA+gBUAAYArQCDADMAxwAWAGgAvAA1AI8ARADkAF0AyQAmABEATgCoAHEA8gA4ALkA5gBZACkAngAWAIcAOwDaAI0AwQB6ADkA9gBuAFAAmgAlAOcAYgD7AHoAMQDDAAgApgDcACwAiQACAEsAlQAXAGkA/gCTAE4AzAAhAHQAPwC0AB0AnwBkABUApADrADAA1QB1AAcAEACxAGoAIgCdAFUANgDAAHUA6gArAKIAxgA9AIAAEwC7ADEA4QBeANUALgB+AM0ASQCRAB4AcAC/AD4AiADbALYAQQDwAA0AbwDLABoAWwAOALMAZQAmAFEArAA4AN0ADgCoAE0AlwAjAGwA9AARAJwAWADPACoAfQD+ABQAYAAsANEAfAAyAK0ABwCUAD8A9gB4ADUA0QAcAI8AXwAiAMAAcwA6AOYADAC5AEcAigAyAPEAqQAcALUASgCfAC4A6QAcAJ4AVgDFACQA4QCDAEgAEwCgAPcAbgBAALsA/ABqACwAxwBSAKcANgDbAGEACgDEAHkAQADpAAgAjwBvAGYANwDsABMAjQD6AF4AKwC8AFMA5gAPAEwAmwAqAIAASQChABsAcQDtAIEAIACwAFUA2gAvAJkAZgDCADkA+ACnAE4A2QA8ACAAcwCxADkAzACGADAAqwDeAAkAxgA9ANYAiABdALUAFAA/AJYA8gAmAH8A/wBGAIkAHQDiAFQADQDCAG4AkwDlAEQAFQClAGQAJgB0AMMANACMABgAUwAvAKwAJgD4AGkAyABZABkArgA6ANMAXwATAKYAMwB7AJEAKgD/AFwABQC3AG0A7QBPAJsA/QBFAKMA7QB1AC0AnAAdAHcARADWADAAhQA9AN4AkQAjAL0A9QBsAMgASwAjAKwATwAVAKEANgCAAC4A1gAMAFgAkgAfAGYAvQD+AGEAuAA0AOMACwCjAE4A7ABnAB4AmABRABEAhAA+AO4AzAB2ADUAxgBxAPQAIQC/AJgAQwC0ACkAzwBKAIgAFQA8AI0A+QAQAF4AgAAsAL8AOADcAIAAwgBaAPcAKwCcAAsA5gCNACUAVgASAJwAYAAZAHsAyQA6AJUA6AA5AKYAzQBPACIAdQCtADcA0gB7AKcADABHALkANgB0AMsAHwBjAEAAvQD2AKkATADSAIsA3gAxAFUArQAoAHMA/QBYAC4AlwDfAD4AiwACAFAAngDlAGEAkgAmANsAsQAJAEQAmAAZAGsADgA6AMEALQDrAKIAagAlAJoA9QASAIMASAC6AGUANgDBABwAcwDtADEAfgDVAEEA+wCFACgAXwC2ANsAUgCvAIAA5wADAHgARwAOAMcAfgA9AGAAswArANIAgQARAKQAWADOAEYAmAAiALUAOQBwAB0AngDgAE0AkAAwAMkAKABbAKUAhgAzALsA+gBcAJAAHABEAJcA6gA5APIAfQBJAMMAKgCBAN8AWwAUAIoA9gBUAL8ANQB5AAAAdAA4ANUAHgCVAFAAzQBuADUAqAAjAHEAygBUABMAoABnADAA1AAkAJoA9wBCAK8AbAAgAKoAPwDrAJMAGgDGAEMAtAAMAPEAaADiAD8AEwCPANoATAC3AC8AhAD7AF8AJgCrADsAjADaAGUALQCFAPEAmwBXAMcALABuALMA+gAAWgRuYW1lAAoJY29tcC53YXNtAScDAAZtZW1zZXQBDmNvbXBfaGVhcF9iYXNlAgxjb21wX3Byb2Nlc3MHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQB/CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVjbGFuZ18xOC4xLjItd2FzaS1zZGsgKGh0dHBzOi8vZ2l0aHViLmNvbS9sbHZtL2xsdm0tcHJvamVjdCAyNmExZDY2MDFkNzI3YTk2ZjQzMDFkMGQ4NjQ3YjVhNDI3NjBhZTBjKQAsD3RhcmdldF9mZWF0dXJlcwIrD211dGFibGUtZ2xvYmFscysIc2lnbi1leHQ=";
 let wasmRuntimePromise = null;
 
 function wasmBytesFromBase64(value) {
@@ -1540,7 +1542,7 @@ function alignUp(value, alignment) {
 
 // Lays out source, palette, output and error buffers above the module's
 // static data/stack and grows memory to fit. Returns null when it cannot.
-function prepareWasmMemory(instance, width, height, sourceBytes, paletteBytes) {
+function prepareWasmMemory(instance, width, height, sourceBytes, paletteBytes, matrixBytes = 0) {
 	const memory = instance.exports.memory;
 	const heapBase = typeof instance.exports.comp_heap_base === "function"
 		? instance.exports.comp_heap_base()
@@ -1551,7 +1553,9 @@ function prepareWasmMemory(instance, width, height, sourceBytes, paletteBytes) {
 	const paletteOffset = alignUp(sourceOffset + sourceBytes, 16);
 	const outputOffset = alignUp(paletteOffset + paletteBytes, 16);
 	const errorOffset = alignUp(outputOffset + outputBytes, 16);
-	const requiredBytes = errorOffset + errorBytes + WASM_PAGE_BYTES;
+	// Host blue-noise matrix (modes 8–10) is placed after the FS error buffer region.
+	const matrixOffset = alignUp(errorOffset + errorBytes, 16);
+	const requiredBytes = matrixOffset + matrixBytes + WASM_PAGE_BYTES;
 	if (requiredBytes > WASM_MAX_ADDRESS) return null;
 	const missingPages = Math.ceil(requiredBytes / WASM_PAGE_BYTES) - memory.buffer.byteLength / WASM_PAGE_BYTES;
 	if (missingPages > 0) {
@@ -1562,7 +1566,7 @@ function prepareWasmMemory(instance, width, height, sourceBytes, paletteBytes) {
 		}
 	}
 	if (memory.buffer.byteLength < requiredBytes) return null;
-	return { memory, sourceOffset, paletteOffset, outputOffset, errorOffset };
+	return { memory, sourceOffset, paletteOffset, outputOffset, errorOffset, matrixOffset };
 }
 
 async function runWasmPipeline(data, width, height, mode, output, onProgress, onRow, hasAlpha, frameInfo = null) {
@@ -1582,12 +1586,18 @@ async function runWasmPipeline(data, width, height, mode, output, onProgress, on
 	}
 	const sourceBytes = width * height * 4;
 	const paletteBytes = rgbPalette.length * 4;
-	const layout = prepareWasmMemory(instance, width, height, sourceBytes, paletteBytes);
+	const largeBlue = {
+		blue64: { modeId: 8, size: 64, data: typeof BLUE64_U8 !== "undefined" ? BLUE64_U8 : null },
+		blue128: { modeId: 9, size: 128, data: typeof BLUE128_U8 !== "undefined" ? BLUE128_U8 : null },
+		blue256: { modeId: 10, size: 256, data: typeof BLUE256_U8 !== "undefined" ? BLUE256_U8 : null },
+	}[mode];
+	const matrixBytes = largeBlue ? largeBlue.size * largeBlue.size : 0;
+	const layout = prepareWasmMemory(instance, width, height, sourceBytes, paletteBytes, matrixBytes);
 	if (!layout) {
 		setProcessingStatusLine("graphics", "WASM: not enough memory for this frame; using Script fallback...");
 		return null;
 	}
-	const { memory, sourceOffset, paletteOffset, outputOffset, errorOffset } = layout;
+	const { memory, sourceOffset, paletteOffset, outputOffset, errorOffset, matrixOffset } = layout;
 	// Create the views only after memory.grow(), which detaches older buffers.
 	const bytes = new Uint8Array(memory.buffer);
 	bytes.set(new Uint8Array(data.buffer, data.byteOffset, sourceBytes), sourceOffset);
@@ -1599,13 +1609,30 @@ async function runWasmPipeline(data, width, height, mode, output, onProgress, on
 		bytes[offset + 2] = color.b;
 		bytes[offset + 3] = color.a ?? 255;
 	}
-	const modeIdMap = { solid: 0, bayer4: 1, bayer8: 2, bayer16: 3, blue8: 4, blue16: 5, blue32: 6, error: 7 };
-	// blue64/128/256 stay JS/GPU-only (large tables); force Script fallback from WASM path
-	if (!(mode in modeIdMap) && (mode === "blue64" || mode === "blue128" || mode === "blue256")) {
-		setProcessingStatusLine("graphics", "WASM: large blue-noise uses Script path...");
-		return null;
-	}
+	const modeIdMap = {
+		solid: 0,
+		bayer4: 1,
+		bayer8: 2,
+		bayer16: 3,
+		blue8: 4,
+		blue16: 5,
+		blue32: 6,
+		error: 7,
+		blue64: 8,
+		blue128: 9,
+		blue256: 10,
+	};
 	const modeId = modeIdMap[mode] ?? 0;
+	// Host matrix for blue64/128/256 is passed through error_ptr (see comp.c modes 8–10).
+	let processErrorPtr = errorOffset;
+	if (largeBlue) {
+		if (!largeBlue.data || largeBlue.data.length < matrixBytes) {
+			setProcessingStatusLine("graphics", "WASM: large blue-noise matrix missing.");
+			return null;
+		}
+		bytes.set(largeBlue.data.subarray(0, matrixBytes), matrixOffset);
+		processErrorPtr = matrixOffset;
+	}
 	const result = instance.exports.comp_process(
 		sourceOffset,
 		paletteOffset,
@@ -1614,7 +1641,7 @@ async function runWasmPipeline(data, width, height, mode, output, onProgress, on
 		height,
 		rgbPalette.length,
 		modeId,
-		errorOffset,
+		processErrorPtr,
 		memory.buffer.byteLength,
 	);
 	if (result !== 0)
@@ -1775,286 +1802,365 @@ async function runConversionPipeline({
 }
 //end
 //script/engine/matrix/gpu.js
-const VERTEX_SHADER =
-		"\nattribute vec2 a_position;\nattribute vec2 a_texCoord;\nvarying vec2 v_texCoord;\nvoid main() {\n\tgl_Position = vec4(a_position, 0.0, 1.0);\n\tv_texCoord = a_texCoord;\n}",
-	FRAG_BASE =
-		"\nprecision highp float;\nvarying vec2 v_texCoord;\nuniform sampler2D u_image;\nuniform vec2 u_resolution;\n\nvec3 samplePixel() {\n\treturn texture2D(u_image, v_texCoord).rgb;\n}\n\nfloat getAlpha() {\n\treturn texture2D(u_image, v_texCoord).a;\n}\n",
-	FRAG_SOLID =
-		FRAG_BASE +
-		"\nvoid main() {\n\tfloat alpha = getAlpha();\n\tif (alpha < 0.5) {\n\t\tgl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);\n\t\treturn;\n\t}\n\tgl_FragColor = vec4(samplePixel(), 1.0);\n}",
-	FRAG_BAYER =
-		FRAG_BASE +
-		"\nuniform sampler2D u_bayerTex;\nuniform float u_bayerSize;\nuniform float u_spread;\n\nvoid main() {\n\tfloat alpha = getAlpha();\n\tif (alpha < 0.5) {\n\t\tgl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);\n\t\treturn;\n\t}\n\tvec2 px = v_texCoord * u_resolution;\n\tvec2 bayerUV = mod(px, u_bayerSize) / u_bayerSize;\n\tfloat factor = texture2D(u_bayerTex, bayerUV).r - 0.5;\n\tvec3 col = samplePixel() + factor * u_spread / 255.0;\n\tcol = clamp(col, 0.0, 1.0);\n\tgl_FragColor = vec4(col, 1.0);\n}",
-	FRAG_BLUE =
-		FRAG_BASE +
-		"\nuniform sampler2D u_noise;\nuniform float u_spread;\nuniform vec2 u_noiseSize;\n\nvoid main() {\n\tfloat alpha = getAlpha();\n\tif (alpha < 0.5) {\n\t\tgl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);\n\t\treturn;\n\t}\n\tvec2 noiseUV = fract(v_texCoord * u_resolution / u_noiseSize);\n\tfloat factor = texture2D(u_noise, noiseUV).r - 0.5;\n\tvec3 col = samplePixel() + factor * u_spread / 255.0;\n\tcol = clamp(col, 0.0, 1.0);\n\tgl_FragColor = vec4(col, 1.0);\n}";
+// GLSL sources use tab indent to match the rest of the project.
+const VERTEX_SHADER = `
+attribute vec2 a_position;
+attribute vec2 a_texCoord;
+varying vec2 v_texCoord;
 
-function compileShader(e, t, r) {
-	const a = e.createShader(t);
-	if ((e.shaderSource(a, r), e.compileShader(a), !e.getShaderParameter(a, e.COMPILE_STATUS))) {
-		const t = e.getShaderInfoLog(a);
-		throw (e.deleteShader(a), new Error("Shader compile error: " + t));
+void main() {
+	gl_Position = vec4(a_position, 0.0, 1.0);
+	v_texCoord = a_texCoord;
+}
+`;
+
+const FRAG_BASE = `
+precision highp float;
+varying vec2 v_texCoord;
+uniform sampler2D u_image;
+uniform vec2 u_resolution;
+
+vec3 samplePixel() {
+	return texture2D(u_image, v_texCoord).rgb;
+}
+
+float getAlpha() {
+	return texture2D(u_image, v_texCoord).a;
+}
+`;
+
+const FRAG_SOLID = FRAG_BASE + `
+void main() {
+	float alpha = getAlpha();
+	if (alpha < 0.5) {
+		gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+		return;
 	}
-	return a;
+	gl_FragColor = vec4(samplePixel(), 1.0);
+}
+`;
+
+// Ordered Bayer: factor = matrixSample - 0.5; add factor * spread/255
+const FRAG_BAYER = FRAG_BASE + `
+uniform sampler2D u_bayerTex;
+uniform float u_bayerSize;
+uniform float u_spread;
+
+void main() {
+	float alpha = getAlpha();
+	if (alpha < 0.5) {
+		gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+		return;
+	}
+	vec2 px = v_texCoord * u_resolution;
+	vec2 bayerUV = mod(px, u_bayerSize) / u_bayerSize;
+	float factor = texture2D(u_bayerTex, bayerUV).r - 0.5;
+	vec3 col = samplePixel() + factor * u_spread / 255.0;
+	col = clamp(col, 0.0, 1.0);
+	gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// Blue-noise map tiled across the image (same spread convention as Bayer).
+const FRAG_BLUE = FRAG_BASE + `
+uniform sampler2D u_noise;
+uniform float u_spread;
+uniform vec2 u_noiseSize;
+
+void main() {
+	float alpha = getAlpha();
+	if (alpha < 0.5) {
+		gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+		return;
+	}
+	vec2 noiseUV = fract(v_texCoord * u_resolution / u_noiseSize);
+	float factor = texture2D(u_noise, noiseUV).r - 0.5;
+	vec3 col = samplePixel() + factor * u_spread / 255.0;
+	col = clamp(col, 0.0, 1.0);
+	gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compileShader(gl, type, source) {
+	const shader = gl.createShader(type);
+	gl.shaderSource(shader, source);
+	gl.compileShader(shader);
+	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+		const log = gl.getShaderInfoLog(shader);
+		gl.deleteShader(shader);
+		throw new Error("Shader compile error: " + log);
+	}
+	return shader;
 }
 
-function createProgram(e, t, r) {
-	const a = compileShader(e, e.VERTEX_SHADER, t),
-		n = compileShader(e, e.FRAGMENT_SHADER, r),
-		o = e.createProgram();
-	if (
-		(e.attachShader(o, a),
-		e.attachShader(o, n),
-		e.linkProgram(o),
-		!e.getProgramParameter(o, e.LINK_STATUS))
-	)
-		throw new Error("Program link error: " + e.getProgramInfoLog(o));
-	return o;
+function createProgram(gl, vertSrc, fragSrc) {
+	const vs = compileShader(gl, gl.VERTEX_SHADER, vertSrc);
+	const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
+	const prog = gl.createProgram();
+	gl.attachShader(prog, vs);
+	gl.attachShader(prog, fs);
+	gl.linkProgram(prog);
+	if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+		throw new Error("Program link error: " + gl.getProgramInfoLog(prog));
+	}
+	return prog;
 }
+
+/** Bayer / blue-noise amplitude used as u_spread (matches Script/WASM). */
+const GPU_SPREAD = {
+	bayer4: 112,
+	bayer8: 128,
+	bayer16: 144,
+	blue8: 112,
+	blue16: 128,
+	blue32: 144,
+	blue64: 152,
+	blue128: 160,
+	blue256: 168,
+};
 
 class GLEngine {
-	static checkWebGL(e) {
+	static checkWebGL(canvas) {
 		try {
-			const t = e || document.createElement("canvas"),
-				r = {
-					premultipliedAlpha: !1,
-					alpha: !0,
-					antialias: !1,
-				};
+			const el = canvas || document.createElement("canvas");
+			const opts = {
+				premultipliedAlpha: false,
+				alpha: true,
+				antialias: false,
+			};
 			return (
-				t.getContext("webgl2", r) ||
-				t.getContext("webgl", r) ||
-				t.getContext("experimental-webgl", r) ||
+				el.getContext("webgl2", opts) ||
+				el.getContext("webgl", opts) ||
+				el.getContext("experimental-webgl", opts) ||
 				null
 			);
-		} catch (e) {
+		} catch {
 			return null;
 		}
 	}
-	constructor(e) {
-		((this._sourceCanvas = e), (this.canvas = document.createElement("canvas")));
-		const t = GLEngine.checkWebGL(this.canvas);
-		if (!t) throw new Error("WebGL not supported");
-		((this.gl = t), this._initQuad(), (this.programs = {}), (this.textures = {}));
+
+	constructor(sourceCanvas) {
+		this._sourceCanvas = sourceCanvas;
+		this.canvas = document.createElement("canvas");
+		const gl = GLEngine.checkWebGL(this.canvas);
+		if (!gl) throw new Error("WebGL not supported");
+		this.gl = gl;
+		this.programs = {};
+		this.textures = {};
+		this._initQuad();
 	}
+
 	_initQuad() {
-		const e = this.gl,
-			t = e.createBuffer();
-		(e.bindBuffer(e.ARRAY_BUFFER, t),
-			e.bufferData(e.ARRAY_BUFFER, QUAD_VERTICES, e.STATIC_DRAW),
-			(this.vbo = t));
+		const gl = this.gl;
+		const vbo = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+		gl.bufferData(gl.ARRAY_BUFFER, QUAD_VERTICES, gl.STATIC_DRAW);
+		this.vbo = vbo;
 	}
-	_useProgram(e) {
-		const t = this.gl;
-		(t.useProgram(e), t.bindBuffer(t.ARRAY_BUFFER, this.vbo));
-		const r = t.getAttribLocation(e, "a_position"),
-			a = t.getAttribLocation(e, "a_texCoord");
-		(t.enableVertexAttribArray(r),
-			t.enableVertexAttribArray(a),
-			t.vertexAttribPointer(r, 2, t.FLOAT, !1, 16, 0),
-			t.vertexAttribPointer(a, 2, t.FLOAT, !1, 16, 8));
+
+	_useProgram(prog) {
+		const gl = this.gl;
+		gl.useProgram(prog);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+		const pos = gl.getAttribLocation(prog, "a_position");
+		const uv = gl.getAttribLocation(prog, "a_texCoord");
+		gl.enableVertexAttribArray(pos);
+		gl.enableVertexAttribArray(uv);
+		gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 16, 0);
+		gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
 	}
-	_getProgram(e) {
-		if (this.programs[e]) return this.programs[e];
-		const t = this.gl;
-		let r;
-		switch (e) {
-			case "solid":
-			default:
-				r = createProgram(t, VERTEX_SHADER, FRAG_SOLID);
-				break;
 
-			case "bayer4":
-			case "bayer8":
-			case "bayer16":
-				r = createProgram(t, VERTEX_SHADER, FRAG_BAYER);
-				break;
-
-			case "blue8":
-			case "blue16":
-			case "blue32":
-			case "blue64":
-			case "blue128":
-			case "blue256":
-				r = createProgram(t, VERTEX_SHADER, FRAG_BLUE);
+	_getProgram(mode) {
+		if (this.programs[mode]) return this.programs[mode];
+		const gl = this.gl;
+		let prog;
+		if (mode.startsWith("bayer")) {
+			prog = createProgram(gl, VERTEX_SHADER, FRAG_BAYER);
+		} else if (mode.startsWith("blue")) {
+			prog = createProgram(gl, VERTEX_SHADER, FRAG_BLUE);
+		} else {
+			prog = createProgram(gl, VERTEX_SHADER, FRAG_SOLID);
 		}
-		return ((this.programs[e] = r), r);
+		this.programs[mode] = prog;
+		return prog;
 	}
-	_uploadImageTexture(e, t, r) {
-		const a = this.gl;
-		let n = this.textures.image;
-		return (
-			n || ((n = a.createTexture()), (this.textures.image = n)),
-			a.activeTexture(a.TEXTURE0),
-			a.bindTexture(a.TEXTURE_2D, n),
-			a.texImage2D(a.TEXTURE_2D, 0, a.RGBA, t, r, 0, a.RGBA, a.UNSIGNED_BYTE, e),
-			a.texParameteri(a.TEXTURE_2D, a.TEXTURE_MIN_FILTER, a.NEAREST),
-			a.texParameteri(a.TEXTURE_2D, a.TEXTURE_MAG_FILTER, a.NEAREST),
-			a.texParameteri(a.TEXTURE_2D, a.TEXTURE_WRAP_S, a.CLAMP_TO_EDGE),
-			a.texParameteri(a.TEXTURE_2D, a.TEXTURE_WRAP_T, a.CLAMP_TO_EDGE),
-			n
+
+	_uploadImageTexture(pixels, w, h) {
+		const gl = this.gl;
+		let tex = this.textures.image;
+		if (!tex) {
+			tex = gl.createTexture();
+			this.textures.image = tex;
+		}
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		return tex;
+	}
+
+	_uploadLumaTex(key, data, size, unit) {
+		const gl = this.gl;
+		let tex = this.textures[key];
+		if (!tex) {
+			tex = gl.createTexture();
+			this.textures[key] = tex;
+		}
+		gl.activeTexture(unit);
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.LUMINANCE,
+			size,
+			size,
+			0,
+			gl.LUMINANCE,
+			gl.UNSIGNED_BYTE,
+			data,
 		);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+		return tex;
 	}
-	_uploadLuminanceTexture(e, t, r, a) {
-		const n = this.gl;
-		let o = this.textures[e];
-		return (
-			o || ((o = n.createTexture()), (this.textures[e] = o)),
-			n.activeTexture(a),
-			n.bindTexture(n.TEXTURE_2D, o),
-			n.texImage2D(n.TEXTURE_2D, 0, n.LUMINANCE, r, r, 0, n.LUMINANCE, n.UNSIGNED_BYTE, t),
-			n.texParameteri(n.TEXTURE_2D, n.TEXTURE_MIN_FILTER, n.NEAREST),
-			n.texParameteri(n.TEXTURE_2D, n.TEXTURE_MAG_FILTER, n.NEAREST),
-			n.texParameteri(n.TEXTURE_2D, n.TEXTURE_WRAP_S, n.REPEAT),
-			n.texParameteri(n.TEXTURE_2D, n.TEXTURE_WRAP_T, n.REPEAT),
-			o
-		);
-	}
-	_getBayerArray(e) {
-		switch (e) {
-			case "bayer4":
-			default:
-				return {
-					data: BAYER4_U8,
-					size: 4,
-				};
 
-			case "bayer8":
-				return {
-					data: BAYER8_U8,
-					size: 8,
-				};
+	_bayerMap(mode) {
+		if (mode === "bayer8") return { data: BAYER8_U8, size: 8 };
+		if (mode === "bayer16") return { data: BAYER16_U8, size: 16 };
+		return { data: BAYER4_U8, size: 4 };
+	}
 
-			case "bayer16":
-				return {
-					data: BAYER16_U8,
-					size: 16,
-				};
-		}
+	_blueMap(mode) {
+		if (mode === "blue16") return { data: BLUE16_U8, size: 16 };
+		if (mode === "blue32") return { data: BLUE32_U8, size: 32 };
+		if (mode === "blue64") return { data: BLUE64_U8, size: 64 };
+		if (mode === "blue128") return { data: BLUE128_U8, size: 128 };
+		if (mode === "blue256") return { data: BLUE256_U8, size: 256 };
+		return { data: BLUE8_U8, size: 8 };
 	}
-	_getBlueNoiseArray(e) {
-		switch (e) {
-			case "blue8":
-			default:
-				return { data: BLUE8_U8, size: 8 };
-			case "blue16":
-				return { data: BLUE16_U8, size: 16 };
-			case "blue32":
-				return { data: BLUE32_U8, size: 32 };
-			case "blue64":
-				return { data: BLUE64_U8, size: 64 };
-			case "blue128":
-				return { data: BLUE128_U8, size: 128 };
-			case "blue256":
-				return { data: BLUE256_U8, size: 256 };
-		}
-	}
+
+	/**
+	 * GPU ordered dither → readback → palette quantize (+ 0.6 residual for ordered modes).
+	 */
 	async render({
-		data: e,
-		w: t,
-		h: r,
-		mode: a,
-		rgbPalette: n,
-		outImgData: o,
-		onRow: i,
-		hasAlpha: s,
+		data: pixels,
+		w,
+		h,
+		mode,
+		rgbPalette: palette,
+		outImgData: outImg,
+		onRow,
+		hasAlpha,
 	}) {
-		const c = this.gl;
-		(this.canvas.width === t && this.canvas.height === r) ||
-			((this.canvas.width = t), (this.canvas.height = r));
-		const u = this._getProgram(a);
-		if (
-			(this._useProgram(u),
-			this._uploadImageTexture(e, t, r),
-			c.uniform1i(c.getUniformLocation(u, "u_image"), 0),
-			c.uniform2f(c.getUniformLocation(u, "u_resolution"), t, r),
-			a.startsWith("bayer"))
-		) {
-			const e = this._getBayerArray(a);
-			(this._uploadLuminanceTexture("bayer", e.data, e.size, c.TEXTURE1),
-				c.uniform1i(c.getUniformLocation(u, "u_bayerTex"), 1),
-				c.uniform1f(c.getUniformLocation(u, "u_bayerSize"), e.size),
-					c.uniform1f(
-						c.getUniformLocation(u, "u_spread"),
-						a === "bayer16" ? 144 : a === "bayer8" ? 128 : 112,
-					));
-		} else if (a.startsWith("blue")) {
-			const e = this._getBlueNoiseArray(a);
-			(this._uploadLuminanceTexture("noise", e.data, e.size, c.TEXTURE1),
-				c.uniform1i(c.getUniformLocation(u, "u_noise"), 1),
-				c.uniform1f(
-					c.getUniformLocation(u, "u_spread"),
-					a === "blue256"
-						? 168
-						: a === "blue128"
-							? 152
-							: a === "blue64"
-								? 136
-								: a === "blue32"
-									? 128
-									: a === "blue16"
-										? 112
-										: 96,
-				),
-				c.uniform2f(c.getUniformLocation(u, "u_noiseSize"), e.size, e.size));
+		const gl = this.gl;
+		if (this.canvas.width !== w || this.canvas.height !== h) {
+			this.canvas.width = w;
+			this.canvas.height = h;
 		}
-		(c.viewport(0, 0, t, r),
-			c.clearColor(0, 0, 0, 0),
-			c.clear(c.COLOR_BUFFER_BIT),
-			c.drawArrays(c.TRIANGLE_STRIP, 0, 4));
-		const l = o.data;
-		c.readPixels(0, 0, t, r, c.RGBA, c.UNSIGNED_BYTE, l);
-		const _ = createIndexMap(t * r),
-			E = n.length,
-			g = CHAR_TABLE,
-			m = a.startsWith("bayer") || a.startsWith("blue"),
-			T = (e) => (e < 0 ? 0 : e > 255 ? 255 : e);
-		let h = i ? "" : "img`\n";
-		for (let e = 0; e < r; e++) {
-			let r = "";
-			const a = e * t;
-			let o = 0,
-				c = 0,
-				u = 0;
-			for (let e = 0; e < t; e++) {
-				const t = a + e,
-					i = t << 2;
-				if (l[i + 3] < 128)
-					((_[t] = 0),
-						(r += g[0]),
-						(l[i] = 0),
-						(l[i + 1] = 0),
-						(l[i + 2] = 0),
-						(l[i + 3] = 0),
-						(o = c = u = 0));
-				else {
-					const e = m ? T(l[i] + o) : l[i],
-						a = m ? T(l[i + 1] + c) : l[i + 1],
-						h = m ? T(l[i + 2] + u) : l[i + 2];
-					let R = 1 / 0,
-						A = 1;
-					for (let t = 1; t < E; t++) {
-						const r = n[t],
-							o = e - r.r,
-							i = a - r.g,
-							s = h - r.b,
-							c = o * o + i * i + s * s;
-						c < R && ((R = c), (A = t));
-					}
-					((_[t] = A), (r += g[A]));
-					const d = n[A];
-					(m && ((o = 0.6 * (e - d.r)), (c = 0.6 * (a - d.g)), (u = 0.6 * (h - d.b))),
-						(l[i] = d.r),
-						(l[i + 1] = d.g),
-						(l[i + 2] = d.b),
-						(l[i + 3] = s && undefined !== d.a ? d.a : 255));
+		const prog = this._getProgram(mode);
+		this._useProgram(prog);
+		this._uploadImageTexture(pixels, w, h);
+		gl.uniform1i(gl.getUniformLocation(prog, "u_image"), 0);
+		gl.uniform2f(gl.getUniformLocation(prog, "u_resolution"), w, h);
+
+		if (mode.startsWith("bayer")) {
+			const map = this._bayerMap(mode);
+			this._uploadLumaTex("bayer", map.data, map.size, gl.TEXTURE1);
+			gl.uniform1i(gl.getUniformLocation(prog, "u_bayerTex"), 1);
+			gl.uniform1f(gl.getUniformLocation(prog, "u_bayerSize"), map.size);
+			gl.uniform1f(gl.getUniformLocation(prog, "u_spread"), GPU_SPREAD[mode] || 112);
+		} else if (mode.startsWith("blue")) {
+			const map = this._blueMap(mode);
+			this._uploadLumaTex("noise", map.data, map.size, gl.TEXTURE1);
+			gl.uniform1i(gl.getUniformLocation(prog, "u_noise"), 1);
+			gl.uniform1f(gl.getUniformLocation(prog, "u_spread"), GPU_SPREAD[mode] || 112);
+			gl.uniform2f(gl.getUniformLocation(prog, "u_noiseSize"), map.size, map.size);
+		}
+
+		gl.viewport(0, 0, w, h);
+		gl.clearColor(0, 0, 0, 0);
+		gl.clear(gl.COLOR_BUFFER_BIT);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+		const rgba = new Uint8Array(w * h * 4);
+		gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+
+		// WebGL readPixels is bottom-up; flip into outImg.data
+		const out = outImg.data;
+		for (let y = 0; y < h; y += 1) {
+			const srcRow = (h - 1 - y) * w * 4;
+			const dstRow = y * w * 4;
+			out.set(rgba.subarray(srcRow, srcRow + w * 4), dstRow);
+		}
+
+		const indexMap = createIndexMap(w * h);
+		const chars = CHAR_TABLE;
+		const palLen = palette.length;
+		const ordered = mode.startsWith("bayer") || mode.startsWith("blue");
+		const clamp8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+		let hex = onRow ? "" : "img`\n";
+
+		for (let y = 0; y < h; y += 1) {
+			let line = "";
+			const rowStart = y * w;
+			let resR = 0,
+				resG = 0,
+				resB = 0;
+			for (let x = 0; x < w; x += 1) {
+				const i = rowStart + x;
+				const o = i << 2;
+				if (out[o + 3] < 128) {
+					indexMap[i] = 0;
+					line += chars[0];
+					out[o] = out[o + 1] = out[o + 2] = out[o + 3] = 0;
+					resR = resG = resB = 0;
+					continue;
 				}
+				const r = ordered ? clamp8(out[o] + resR) : out[o];
+				const g = ordered ? clamp8(out[o + 1] + resG) : out[o + 1];
+				const b = ordered ? clamp8(out[o + 2] + resB) : out[o + 2];
+				let best = 1;
+				let bestD = Infinity;
+				for (let p = 1; p < palLen; p += 1) {
+					const c = palette[p];
+					const dr = r - c.r,
+						dg = g - c.g,
+						db = b - c.b;
+					const d = dr * dr + dg * dg + db * db;
+					if (d < bestD) {
+						bestD = d;
+						best = p;
+						if (d === 0) break;
+					}
+				}
+				indexMap[i] = best;
+				line += chars[best];
+				const c = palette[best];
+				if (ordered) {
+					resR = 0.6 * (r - c.r);
+					resG = 0.6 * (g - c.g);
+					resB = 0.6 * (b - c.b);
+				}
+				out[o] = c.r;
+				out[o + 1] = c.g;
+				out[o + 2] = c.b;
+				out[o + 3] = hasAlpha && c.a !== undefined ? c.a : 255;
 			}
-			i ? await i(e, r, _) : (h += r + "\n");
+			if (onRow) {
+				await onRow(y, line, indexMap.subarray(rowStart, rowStart + w));
+			} else {
+				hex += line + "\n";
+			}
 		}
+
 		return {
-			hexString: i ? "" : h + "`",
-			indexMap: _,
+			hexString: onRow ? "" : hex + "`",
+			indexMap,
 		};
 	}
 }
@@ -2063,39 +2169,41 @@ let sharedGLEngine = null;
 let sharedGPUCanvas = null;
 
 async function runGLPipeline({
-	canvas: e,
-	data: t,
-	w: r,
-	h: a,
-	mode: n,
-	rgbPalette: o,
-	outImgData: i,
-	onProgress: s,
-	onRow: c,
-	hasAlpha: u,
-	yieldFrames: d = true,
+	canvas,
+	data,
+	w,
+	h,
+	mode,
+	rgbPalette,
+	outImgData,
+	onProgress,
+	onRow,
+	hasAlpha,
+	yieldFrames = true,
 }) {
 	throwIfStopRequested();
 	if (!sharedGLEngine) {
 		sharedGPUCanvas = document.createElement("canvas");
 		sharedGLEngine = new GLEngine(sharedGPUCanvas);
 	}
-	const l = sharedGLEngine;
-	(s("25.0000"),
-		d && (await new Promise((e) => requestAnimationFrame(e))),
-		s("50.0000"),
-		d && (await new Promise((e) => requestAnimationFrame(e))));
-	const _ = await l.render({
-		data: t,
-		w: r,
-		h: a,
-		mode: n,
-		rgbPalette: o,
-		outImgData: i,
-		onRow: c,
-		hasAlpha: u,
+	if (onProgress) {
+		onProgress("25.0000");
+		if (yieldFrames) await new Promise((r) => requestAnimationFrame(r));
+		onProgress("50.0000");
+		if (yieldFrames) await new Promise((r) => requestAnimationFrame(r));
+	}
+	const result = await sharedGLEngine.render({
+		data,
+		w,
+		h,
+		mode,
+		rgbPalette,
+		outImgData,
+		onRow,
+		hasAlpha,
 	});
-	return (s("100.0000"), _);
+	if (onProgress) onProgress("100.0000");
+	return result;
 }
 //end
 //script/engine/media/decoder.js
@@ -3411,6 +3519,7 @@ function renderOutputViewport(name) {
 
 	const state = getOutputState(name);
 	const textareaElement = state.textarea;
+	if (!textareaElement) return;
 	const value = getOutputString(name);
 	const totalLines = state.lineStarts.length;
 	if (state.rendering) {
@@ -3424,12 +3533,28 @@ function renderOutputViewport(name) {
 		state.rendering = false;
 		return;
 	}
-	const metrics = getOutputViewportMetrics(textareaElement);
-	const visualLineCounts = getOutputVisualLayout(name, value, metrics);
-	const totalVisualLines = visualLineCounts.reduce((sum, count) => sum + count, 0);
+
 	const previousRatio = state.followTail
 		? 1
 		: getTextareaScrollRatio(textareaElement, state.lastScrollRatio);
+
+	// Full string for moderate outputs — the blank-line virtual window often
+	// desyncs scrollHeight (especially after the text viewer was display:none
+	// during convert), leaving the textarea looking empty or half-blank.
+	const FULL_RENDER_LINE_LIMIT = 8000;
+	if (totalLines <= FULL_RENDER_LINE_LIMIT) {
+		state.rendering = true;
+		textareaElement.value = value;
+		const maxScrollTop = Math.max(0, textareaElement.scrollHeight - textareaElement.clientHeight);
+		textareaElement.scrollTop = previousRatio * maxScrollTop;
+		state.lastScrollRatio = getTextareaScrollRatio(textareaElement, previousRatio);
+		state.rendering = false;
+		return;
+	}
+
+	const metrics = getOutputViewportMetrics(textareaElement);
+	const visualLineCounts = getOutputVisualLayout(name, value, metrics);
+	const totalVisualLines = visualLineCounts.reduce((sum, count) => sum + count, 0);
 	state.lastScrollRatio = previousRatio;
 	const maxVisualFirstLine = Math.max(0, totalVisualLines - metrics.visibleLines);
 	const requestedVisualFirstLine = Math.round(previousRatio * maxVisualFirstLine);
@@ -3459,7 +3584,7 @@ function renderOutputViewport(name) {
 	const renderedValue =
 		getBlankLines(visualBeforeFirst) +
 		visibleText +
-		getBlankLines(totalVisualLines - visualThroughLast);
+		getBlankLines(Math.max(0, totalVisualLines - visualThroughLast));
 	state.rendering = true;
 	textareaElement.value = renderedValue;
 	const maxScrollTop = Math.max(0, textareaElement.scrollHeight - textareaElement.clientHeight);
@@ -3467,6 +3592,7 @@ function renderOutputViewport(name) {
 	state.lastScrollRatio = getTextareaScrollRatio(textareaElement, previousRatio);
 	state.rendering = false;
 }
+
 function renderOutputViewports() {
 	if (!isTextViewerEnabled()) return;
 	renderOutputViewport("makecode");
@@ -3477,9 +3603,17 @@ function finishOutputViewports() {
 	for (const name of ["makecode", "ascii"]) {
 		const state = getOutputState(name);
 		state.followTail = false;
-		if (isTextViewerEnabled()) state.textarea.scrollTop = 0;
+		state.visualLayoutKey = "";
+		state.lastScrollRatio = 0;
 	}
-	renderOutputViewports();
+	if (isTextViewerEnabled()) {
+		renderOutputViewports();
+		for (const name of ["makecode", "ascii"]) {
+			const state = getOutputState(name);
+			if (state.textarea) state.textarea.scrollTop = 0;
+		}
+		renderOutputViewports();
+	}
 }
 
 function createStringOutputWriter(name) {
@@ -3535,11 +3669,17 @@ for (const [name, state] of Object.entries(outputViewStates)) {
 document.querySelectorAll(".tab-btn").forEach((button) => {
 	button.addEventListener("click", function () {
 		document.querySelectorAll(".tab-btn").forEach((tab) => tab.classList.remove("active"));
-		document
-			.querySelectorAll(".tab-panel")
-			.forEach((panel) => panel.classList.remove("active"));
+		document.querySelectorAll(".tab-panel").forEach((panel) => {
+			panel.classList.remove("active");
+			// Drop any leftover inline display from convert lock / viewer hide.
+			panel.style.display = "";
+		});
 		this.classList.add("active");
-		document.getElementById("tab-" + this.dataset.tab).classList.add("active");
+		const panel = document.getElementById("tab-" + this.dataset.tab);
+		if (panel) {
+			panel.classList.add("active");
+			panel.style.display = "";
+		}
 		renderOutputViewports();
 	});
 });
@@ -3695,18 +3835,25 @@ function applyViewerVisibility() {
 		outputTabs.setAttribute("aria-hidden", showText ? "false" : "true");
 	}
 	if (!showText) {
+		// Hide both panels while text viewers are off (convert lock or user toggle).
 		if (tabPixelart) tabPixelart.style.display = "none";
 		if (tabAscii) tabAscii.style.display = "none";
 	} else {
-		const activeTab = document.querySelector(".tab-btn.active")?.dataset?.tab || "pixelart";
-		if (tabPixelart) {
-			tabPixelart.style.display = activeTab === "pixelart" ? "block" : "none";
-			tabPixelart.classList.toggle("active", activeTab === "pixelart");
-		}
-		if (tabAscii) {
-			tabAscii.style.display = activeTab === "ascii" ? "block" : "none";
-			tabAscii.classList.toggle("active", activeTab === "ascii");
-		}
+		// Clear inline display so .tab-panel / .tab-panel.active CSS can work again.
+		// Previous code forced style.display = "block"|"none" on each panel, which
+		// overrode class-based tab switching — text appeared once after convert then
+		// the other tab (or later updates) stayed blank.
+		if (tabPixelart) tabPixelart.style.display = "";
+		if (tabAscii) tabAscii.style.display = "";
+		const asciiOnly =
+			asciiEnableCheck?.checked && makecodeEnableCheck && !makecodeEnableCheck.checked;
+		let activeTab = document.querySelector(".tab-btn.active")?.dataset?.tab || "pixelart";
+		if (asciiOnly) activeTab = "ascii";
+		document.querySelectorAll(".tab-btn").forEach((btn) => {
+			btn.classList.toggle("active", btn.dataset.tab === activeTab);
+		});
+		if (tabPixelart) tabPixelart.classList.toggle("active", activeTab === "pixelart");
+		if (tabAscii) tabAscii.classList.toggle("active", activeTab === "ascii");
 		renderOutputViewports();
 	}
 	if (showImage && outputObjectUrl && outputImage) {
@@ -3749,6 +3896,13 @@ function unlockViewersAfterProcess() {
 		viewerTextEnable.checked = !!viewerPrefsBeforeProcess.text;
 	}
 	applyViewerVisibility();
+	// Second paint after layout so textareas regain real clientHeight (they were
+	// display:none while locked) and the virtual/full text viewer fills correctly.
+	if (isTextViewerEnabled()) {
+		requestAnimationFrame(() => {
+			renderOutputViewports();
+		});
+	}
 }
 
 if (viewerImageEnable) {
@@ -4524,7 +4678,14 @@ function createAsciiRowStream(e, t, a, n, i) {
 			}
 		},
 		onSourceRow(e, a) {
-			u.set(a, e * width);
+			// Always copy one image row (length === width). Engines must pass a
+			// row view; if a full map is supplied, take the matching slice.
+			const rowOffset = e * width;
+			if (a && a.length >= rowOffset + width && a.length !== width) {
+				u.set(a.subarray(rowOffset, rowOffset + width), rowOffset);
+			} else if (a && a.length >= width) {
+				u.set(a.subarray(0, width), rowOffset);
+			}
 			while (d < s && !(e + 1 < Math.min(t, Math.ceil((d + 1) * r)))) {
 				h(d);
 				d += 1;
@@ -4537,66 +4698,6 @@ function createAsciiRowStream(e, t, a, n, i) {
 			}
 		},
 	};
-}
-function createAsciiInputMap(data, width, height, mode = "solid") {
-	const map = createIndexMap(width * height);
-	const cache = new Map();
-	const ordered = DITHER_MODES[mode];
-	const errors = mode === "error" ? new Float32Array(data.length) : null;
-	for (let y = 0; y < height; y += 1) {
-		let redError = 0;
-		let greenError = 0;
-		let blueError = 0;
-		for (let x = 0; x < width; x += 1) {
-			const pixel = (y * width + x) * 4;
-			if (data[pixel + 3] < 128) {
-				map[pixel >> 2] = 0;
-				redError = greenError = blueError = 0;
-				continue;
-			}
-			let red = data[pixel];
-			let green = data[pixel + 1];
-			let blue = data[pixel + 2];
-			if (ordered) {
-				const size = ordered[1];
-				const threshold = (ordered[0][(y % size) * size + (x % size)] / ordered[2] - 0.5) * ordered[3];
-				red = clamp(red + threshold);
-				green = clamp(green + threshold);
-				blue = clamp(blue + threshold);
-			} else if (errors) {
-				red = clamp(red + errors[pixel] + redError);
-				green = clamp(green + errors[pixel + 1] + greenError);
-				blue = clamp(blue + errors[pixel + 2] + blueError);
-			}
-			let index = cachedFindNearest(red, green, blue, rgbPalette, cache);
-			// Index 0 is reserved for transparency; opaque input must never
-			// become an all-space ASCII row when WASM supplies the image output.
-			if (index === 0 && rgbPalette.length > 1) index = 1;
-			map[pixel >> 2] = index;
-			const color = rgbPalette[index];
-			if (mode === "error") {
-				const errorRed = red - color.r;
-				const errorGreen = green - color.g;
-				const errorBlue = blue - color.b;
-				if (x + 1 < width) {
-					errors[pixel + 4] += errorRed * 0.4375;
-					errors[pixel + 5] += errorGreen * 0.4375;
-					errors[pixel + 6] += errorBlue * 0.4375;
-				}
-				if (y + 1 < height) {
-					if (x) {
-						errors[pixel + width * 4 - 4] += errorRed * 0.1875;
-						errors[pixel + width * 4 - 3] += errorGreen * 0.1875;
-						errors[pixel + width * 4 - 2] += errorBlue * 0.1875;
-					}
-					errors[pixel + width * 4] += errorRed * 0.3125;
-					errors[pixel + width * 4 + 1] += errorGreen * 0.3125;
-					errors[pixel + width * 4 + 2] += errorBlue * 0.3125;
-				}
-			}
-		}
-	}
-	return map;
 }
 function throwIfStopRequested() {
 	if (!stopTextProcessingFlag) return;
@@ -4691,17 +4792,14 @@ function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled,
 	const asciiRows = createAsciiRowStream(width, height, asciiWriter, asciiEnabled, asciiWidth);
 	const textOutputEnabled = makecodeEnabled || asciiEnabled;
 	const textOutputLabel = makecodeEnabled && asciiEnabled ? "Makecode+Ascii" : makecodeEnabled ? "Makecode" : "Ascii";
-	let asciiInputMap = null;
 	let rowsSinceRender = 0;
 	const startFollowTail = () => {
 		getOutputState("makecode").followTail = true;
 		getOutputState("ascii").followTail = true;
 	};
 	return {
-		setAsciiSource(data) {
-			// Engine index rows are preferred; skip a second full-frame CPU dither.
-			asciiInputMap = null;
-		},
+		// Kept for call-site compatibility; engine index rows are the only ASCII source.
+		setAsciiSource(_data) {},
 		startStatic() {
 			if (!textOutputEnabled) return;
 			makecodeWriter?.reset();
@@ -4738,8 +4836,7 @@ function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled,
 				setProcessingStatusLine("text", `Processing Text(${textOutputLabel}): ${textProgress}%...`);
 			}
 			makecodeWriter?.appendLine(line);
-			const rowMap = sourceRow || (asciiInputMap ? asciiInputMap.subarray(row * width, (row + 1) * width) : null);
-			if (rowMap) asciiRows.onSourceRow(row, rowMap);
+			if (sourceRow) asciiRows.onSourceRow(row, sourceRow);
 			rowsSinceRender += 1;
 			if (isTextViewerEnabled() && rowsSinceRender >= 40) {
 				rowsSinceRender = 0;
