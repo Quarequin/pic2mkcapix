@@ -461,10 +461,10 @@ No trace details available.</textarea>
 		</div>
 	</div>
 	<div class="action-buttons">
-		<button id="run" type="submit" disabled>Convert Image</button
+		<button id="run" type="submit" disabled>Convert Graphic</button
 		><button id="reset" type="reset">Reset Form</button
 		><button id="copy" type="button" disabled>Download Text</button
-		><button id="download" type="button" disabled>Download Image</button>
+		><button id="download" type="button" disabled>Download File</button>
 	</div>
 </form>
 <div id="viewer-controls" class="viewer-controls">
@@ -3921,14 +3921,14 @@ const BUTTON_STATES = Object.freeze({
 		copy: !0,
 		dl: !0,
 		copyText: "Download Text",
-		text: "Convert Image",
+		text: "Convert Graphic",
 	},
 	imageLoaded: {
 		run: !1,
 		copy: !0,
 		dl: !0,
 		copyText: "Download Text",
-		text: "Convert Image",
+		text: "Convert Graphic",
 	},
 	processing: {
 		run: !0,
@@ -3949,7 +3949,7 @@ const BUTTON_STATES = Object.freeze({
 		copy: !1,
 		dl: !1,
 		copyText: "Download Text",
-		text: "Convert Image",
+		text: "Convert Graphic",
 	},
 });
 
@@ -5055,11 +5055,11 @@ function currentStatus(percent) {
 	const current = Math.max(0, Math.min(100, Number(percent) || 0));
 	const currentText = current.toFixed(6);
 	if (current >= 100 || !processingTiming.startedAt) {
-		return `Current: ${currentText} - ETA${formatEta(0)}`;
+		return `Current: ${currentText}% - ETA${formatEta(0)}`;
 	}
 	const elapsedSeconds = Math.max(0, (performance.now() - processingTiming.startedAt) / 1000);
 	const etaSeconds = current > 0 ? (elapsedSeconds * (100 - current)) / current : 0;
-	return `Current: ${currentText} - ETA${formatEta(etaSeconds)}`;
+	return `Current: ${currentText}% - ETA${formatEta(etaSeconds)}`;
 }
 
 /**
@@ -5744,9 +5744,9 @@ downloadTextButton.addEventListener("click", async function (e) {
 				lastH,
 			));
 		(setOutputBlob(e), downloadBlob(e, canvasName));
-		downloadMediaButton.textContent = "Image Downloaded!";
+		downloadMediaButton.textContent = "File Downloaded!";
 		setTimeout(() => {
-			downloadMediaButton.textContent = "Download Image";
+			downloadMediaButton.textContent = "Download File";
 		}, 2e3);
 	} catch (e) {
 		displayErrorPopup("IO Canvas Download Error", e.message, e.stack);
