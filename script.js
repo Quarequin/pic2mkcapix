@@ -2815,6 +2815,59 @@ class VideoDecoder {
 		return frameCanvas;
 	}
 
+	/**
+	 * Measure source FPS with requestVideoFrameCallback when available.
+	 * Falls back to 30 when the browser cannot report frame times.
+	 */
+	static async detectFps(video) {
+		const fallback = 30;
+		if (typeof video.requestVideoFrameCallback !== "function") return fallback;
+		const times = [];
+		try {
+			video.currentTime = 0;
+			await VideoDecoder.waitSeek(video, 0);
+			await video.play();
+			await new Promise((resolve) => {
+				let safety = setTimeout(resolve, 800);
+				const onFrame = (_now, meta) => {
+					if (meta && Number.isFinite(meta.mediaTime)) times.push(meta.mediaTime);
+					if (times.length >= 12 || (times.length >= 2 && times[times.length - 1] - times[0] >= 0.35)) {
+						clearTimeout(safety);
+						resolve();
+						return;
+					}
+					video.requestVideoFrameCallback(onFrame);
+				};
+				video.requestVideoFrameCallback(onFrame);
+			});
+			video.pause();
+		} catch {
+			try {
+				video.pause();
+			} catch {
+				/* ignore */
+			}
+			return fallback;
+		}
+		try {
+			video.currentTime = 0;
+		} catch {
+			/* ignore */
+		}
+		if (times.length < 2) return fallback;
+		const deltas = [];
+		for (let i = 1; i < times.length; i += 1) {
+			const d = times[i] - times[i - 1];
+			if (d > 0.001 && d < 0.2) deltas.push(d);
+		}
+		if (!deltas.length) return fallback;
+		deltas.sort((a, b) => a - b);
+		const median = deltas[Math.floor(deltas.length / 2)];
+		const fps = 1 / median;
+		if (!Number.isFinite(fps) || fps < 1 || fps > 120) return fallback;
+		return Math.round(fps * 1000) / 1000;
+	}
+
 	async open() {
 		const objectUrl = URL.createObjectURL(
 			new Blob([this.buffer], { type: this.mimeType }),
@@ -2839,23 +2892,15 @@ class VideoDecoder {
 
 			const duration =
 				Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-			// Prefer the container frame rate when the browser exposes it; else 30fps.
-			let fps = 30;
-			try {
-				if (typeof video.getVideoPlaybackQuality === "function") {
-					/* keep default; quality API does not give fps before play */
-				}
-			} catch {
-				/* ignore */
-			}
+			const fps = await VideoDecoder.detectFps(video);
+			// Frame count from source duration × FPS so output length can match.
 			const frameCount = duration ? Math.max(1, Math.round(duration * fps)) : 1;
+			// Delay derived from FPS: frameCount * delayMs ≈ duration * 1000.
 			const delayMs = 1000 / fps;
 
 			const stream = (async function* () {
 				try {
 					video.pause();
-					// Primary path: sequential seeks with a safe wait (no hang on no-op).
-					// No artificial cap on frameCount — long clips just take longer.
 					for (let index = 0; index < frameCount; index += 1) {
 						const timeSec = duration
 							? Math.min(index / fps, Math.max(0, duration - 1 / fps))
@@ -2883,6 +2928,7 @@ class VideoDecoder {
 			stream.frameCount = frameCount;
 			stream.repeat = 0;
 			stream.duration = duration;
+			stream.fps = fps;
 			return stream;
 		} catch (error) {
 			video.removeAttribute("src");
@@ -3366,6 +3412,11 @@ function createVideoStreamWriter(extension, options = {}) {
 	let recorder = null;
 	let stopped = null;
 	let started = false;
+	// Wall-clock schedule so MediaRecorder duration tracks source FPS delays,
+	// even when quantize/process time would otherwise stretch the output.
+	let timelineStart = 0;
+	let frameIndex = 0;
+	let timelineMs = 0;
 
 	return {
 		async add(frame) {
@@ -3387,6 +3438,9 @@ function createVideoStreamWriter(extension, options = {}) {
 					);
 				});
 				recorder.start(100);
+				timelineStart = performance.now();
+				frameIndex = 0;
+				timelineMs = 0;
 				if (audioEl) {
 					try {
 						audioEl.currentTime = 0;
@@ -3398,7 +3452,13 @@ function createVideoStreamWriter(extension, options = {}) {
 				started = true;
 			}
 			if (videoTrack.requestFrame) videoTrack.requestFrame();
-			await new Promise((resolve) => setTimeout(resolve, Math.max(10, frame.delay || 100)));
+			frameIndex += 1;
+			const step = Math.max(1, Number(frame.delay) || 1000 / 30);
+			timelineMs += step;
+			const wait = timelineMs - (performance.now() - timelineStart);
+			if (wait > 1) {
+				await new Promise((resolve) => setTimeout(resolve, wait));
+			}
 		},
 		finish: async () => {
 			if (audioEl) {
@@ -5038,16 +5098,16 @@ function renderProcessingStatus() {
 	}
 }
 
-/** ETA as HH:MM:SS.MsMs — MsMs is milliseconds zero-padded to 4 digits. */
+/** ETA as HH:MM:SS.MsMs — MsMs is milliseconds at 2 digits (10ms steps). */
 function formatEta(seconds) {
 	const msTotal = Math.max(0, Number(seconds) || 0) * 1000;
 	const hours = Math.floor(msTotal / 3600000);
 	const minutes = Math.floor((msTotal % 3600000) / 60000);
 	const secs = Math.floor((msTotal % 60000) / 1000);
-	const ms = Math.floor(msTotal % 1000);
+	// 2-digit ms: 00–99 representing floor(ms / 10) so the display actually ticks.
+	const ms2 = Math.floor((msTotal % 1000) / 10);
 	const pad2 = (n) => String(n).padStart(2, "0");
-	const pad4 = (n) => String(n).padStart(4, "0");
-	return `${pad2(hours)}:${pad2(minutes)}:${pad2(secs)}.${pad4(ms)}`;
+	return `${pad2(hours)}:${pad2(minutes)}:${pad2(secs)}.${pad2(ms2)}`;
 }
 
 /** Current process percent with 6 decimal places + ETA over the whole job. */
