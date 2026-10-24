@@ -2763,13 +2763,16 @@ class PNGDecoder {
 	}
 }
 
-class VideoDecoder {
+class MediaVideoDecoder {
 	constructor(buffer, mimeType) {
 		this.buffer = buffer;
 		this.mimeType = mimeType || "video/webm";
 	}
 
-	/** Resolve even when the engine skips "seeked" (same timestamp / no-op seek). */
+	/**
+	 * Resolve when the seek finished AND the new frame was presented. "seeked" alone can fire
+	 * before the frame is paintable, so drawImage grabbed the previous frame (video late vs audio).
+	 */
 	static waitSeek(video, timeSec) {
 		const target = Math.max(0, Number(timeSec) || 0);
 		if (
@@ -2781,28 +2784,53 @@ class VideoDecoder {
 		}
 		return new Promise((resolve, reject) => {
 			let done = false;
-			const finish = () => {
-				if (done) return;
+			let seeked = false;
+			let presented = typeof video.requestVideoFrameCallback !== "function";
+			const started = performance.now();
+			const cleanup = () => {
 				done = true;
+				clearInterval(timer);
 				video.removeEventListener("seeked", onSeeked);
 				video.removeEventListener("error", onError);
-				clearTimeout(timer);
+			};
+			const check = () => {
+				if (done || !seeked || !presented) return;
+				cleanup();
 				resolve();
 			};
-			const onSeeked = () => finish();
+			const onSeeked = () => {
+				seeked = true;
+				check();
+			};
 			const onError = () => {
 				if (done) return;
-				done = true;
-				clearTimeout(timer);
+				cleanup();
 				reject(new Error("Video frame seek failed."));
 			};
-			const timer = setTimeout(finish, 250);
+			const timer = setInterval(() => {
+				const waited = performance.now() - started;
+				// Seek finished without events (no-op seek).
+				if (waited > 250 && !video.seeking && video.readyState >= 2) seeked = presented = true;
+				// Frame callback never came (hidden tab / throttled): stop waiting for it.
+				else if (seeked && waited > 400) presented = true;
+				check();
+				if (waited > 20000 && !done) {
+					cleanup();
+					reject(new Error("Video frame seek timed out."));
+				}
+			}, 50);
 			video.addEventListener("seeked", onSeeked, { once: true });
 			video.addEventListener("error", onError, { once: true });
+			if (!presented)
+				video.requestVideoFrameCallback(() => {
+					presented = true;
+					check();
+				});
 			try {
 				video.currentTime = target;
 			} catch {
-				finish();
+				seeked = presented = true;
+				check();
 			}
 		});
 	}
@@ -2825,7 +2853,7 @@ class VideoDecoder {
 		const times = [];
 		try {
 			video.currentTime = 0;
-			await VideoDecoder.waitSeek(video, 0);
+			await MediaVideoDecoder.waitSeek(video, 0);
 			await video.play();
 			await new Promise((resolve) => {
 				let safety = setTimeout(resolve, 800);
@@ -2892,21 +2920,24 @@ class VideoDecoder {
 
 			const duration =
 				Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-			const fps = await VideoDecoder.detectFps(video);
+			const fps = await MediaVideoDecoder.detectFps(video);
 			// Frame count from source duration × FPS so output length can match.
 			const frameCount = duration ? Math.max(1, Math.round(duration * fps)) : 1;
-			// Delay derived from FPS: frameCount * delayMs ≈ duration * 1000.
-			const delayMs = 1000 / fps;
+			// Spread frames evenly across the real source duration (root timing base).
+			const delayMs = duration ? (duration * 1000) / frameCount : 1000 / fps;
 
 			const stream = (async function* () {
 				try {
 					video.pause();
 					for (let index = 0; index < frameCount; index += 1) {
+						// Frame k owns [k*delay, (k+1)*delay): sample its middle so float error at an exact
+						// boundary can never pick the previous frame, and output time == source time.
+						const stepSec = delayMs / 1000;
 						const timeSec = duration
-							? Math.min(index / fps, Math.max(0, duration - 1 / fps))
+							? Math.min((index + 0.5) * stepSec, Math.max(0, duration - 0.5 * stepSec))
 							: 0;
-						await VideoDecoder.waitSeek(video, timeSec);
-						const image = VideoDecoder.drawFrame(video, width, height);
+						await MediaVideoDecoder.waitSeek(video, timeSec);
+						const image = MediaVideoDecoder.drawFrame(video, width, height);
 						yield {
 							image,
 							delay: delayMs,
@@ -3037,7 +3068,7 @@ async function decodeAnimation(e, t) {
 		);
 	}
 	if (r.startsWith("video/")) {
-		const decoder = new VideoDecoder(e, r);
+		const decoder = new MediaVideoDecoder(e, r);
 		const source = {
 			frameCount: null,
 			repeat: 0,
@@ -3383,30 +3414,39 @@ function videoMimeCandidates(extension) {
 	}[extension] || webm;
 }
 
-function createVideoStreamWriter(extension, options = {}) {
+/**
+ * Two-phase video writer (root timing fix):
+ *   1) add() only queues processed bitmaps — never records during quantize
+ *   2) finish() plays the queue onto a private canvas on an absolute timeline
+ *      derived from source duration/FPS, then requestFrame at those instants
+ *
+ * MediaRecorder always follows wall-clock capture times. Recording while
+ * quantize runs makes output slower/longer than the source. Separating the
+ * phases removes that coupling on both Gecko and Chromium.
+ */
+function createRecorderVideoWriter(extension, options = {}) {
 	if (typeof MediaRecorder === "undefined")
 		throw new Error(`This browser cannot encode ${extension.toUpperCase()} output.`);
-	if (typeof canvas.captureStream !== "function" && typeof MediaStreamTrackGenerator !== "function")
+	if (typeof canvas.captureStream !== "function")
 		throw new Error(`This browser cannot capture canvas frames for ${extension.toUpperCase()} output.`);
 
-	const width = options.width || canvas.width || 1;
-	const height = options.height || canvas.height || 1;
-	const fps = Math.min(
-		120,
-		Math.max(
-			1,
-			Number(options.fps) ||
-				(options.duration && options.frameCount
-					? options.frameCount / options.duration
-					: 0) ||
-				30,
-		),
-	);
-	const frameDurationUs = Math.max(1, Math.round(1_000_000 / fps));
-	const frameDurationMs = frameDurationUs / 1000;
-	const expectedFrames = Math.max(1, Number(options.frameCount) || 1);
-	const keepAudio = !!(options.keepAudio && options.audioBuffer && options.audioMime);
+	const width = Math.max(1, options.width || canvas.width || 1);
+	const height = Math.max(1, options.height || canvas.height || 1);
 	const gecko = isGeckoEngine();
+	const keepAudio = !!(options.keepAudio && options.audioBuffer && options.audioMime);
+
+	let fps = Number(options.fps) || 0;
+	if (!fps && options.duration && options.frameCount)
+		fps = options.frameCount / options.duration;
+	if (!fps || !Number.isFinite(fps)) fps = 30;
+	fps = Math.min(120, Math.max(1, fps));
+
+	const expectedFrames = Math.max(1, Number(options.frameCount) || 1);
+	// Prefer exact source duration when known so output length matches origin.
+	const sourceDurationMs =
+		options.duration && options.duration > 0
+			? options.duration * 1000
+			: (expectedFrames * 1000) / fps;
 
 	const candidates = videoMimeCandidates(extension);
 	let mimeType = candidates.find(
@@ -3430,223 +3470,623 @@ function createVideoStreamWriter(extension, options = {}) {
 			`This browser cannot encode ${extension.toUpperCase()} output (no supported MediaRecorder MIME type).`,
 		);
 
-	// Chromium: stamped VideoFrames (timing independent of quantize speed).
-	// Gecko (Waterfox/Firefox): stamps path is incomplete — use queue + fixed-FPS drain.
-	const useStamps =
-		!gecko &&
-		typeof MediaStreamTrackGenerator === "function" &&
-		typeof VideoFrame === "function";
-
-	const chunks = [];
-	let recorder = null;
-	let stopped = null;
-	let started = false;
-	let frameIndex = 0;
-	let stream = null;
-	let stampWriter = null;
-	let audioEl = null;
-	let audioUrl = null;
-	let audioCtx = null;
 	const queue = [];
-
-	const setupAudioRealtime = async (baseStream) => {
-		if (!keepAudio) return baseStream;
-		audioUrl = URL.createObjectURL(
-			new Blob([options.audioBuffer], { type: options.audioMime }),
-		);
-		audioEl = document.createElement("video");
-		audioEl.src = audioUrl;
-		audioEl.muted = false;
-		audioEl.playsInline = true;
-		audioEl.preload = "auto";
-		await new Promise((resolve, reject) => {
-			audioEl.addEventListener("loadedmetadata", resolve, { once: true });
-			audioEl.addEventListener(
-				"error",
-				() => reject(new Error("Unable to open original audio track.")),
-				{ once: true },
-			);
-		});
-		audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-		const srcNode = audioCtx.createMediaElementSource(audioEl);
-		const dest = audioCtx.createMediaStreamDestination();
-		srcNode.connect(dest);
-		return new MediaStream([
-			...baseStream.getVideoTracks(),
-			...dest.stream.getAudioTracks(),
-		]);
-	};
-
-	const startRecorder = async (mediaStream) => {
-		stream = mediaStream;
-		const recOpts = { mimeType };
-		// Gecko is picky about bitsPerSecond on some builds.
-		if (!gecko) recOpts.videoBitsPerSecond = 4e6;
-		try {
-			recorder = new MediaRecorder(mediaStream, recOpts);
-		} catch {
-			recorder = new MediaRecorder(mediaStream, { mimeType: mimeType.split(";")[0] });
-		}
-		stopped = new Promise((resolve, reject) => {
-			recorder.addEventListener("dataavailable", (event) => {
-				if (event.data?.size) chunks.push(event.data);
-			});
-			recorder.addEventListener("stop", resolve, { once: true });
-			recorder.addEventListener(
-				"error",
-				() => reject(new Error(`${extension.toUpperCase()} recording failed.`)),
-				{ once: true },
-			);
-		});
-		try {
-			recorder.start(gecko ? 250 : 100);
-		} catch {
-			recorder.start();
-		}
-	};
-
-	const cleanupAudio = async () => {
-		if (audioEl) {
-			try {
-				audioEl.pause();
-			} catch {
-				/* ignore */
-			}
-			audioEl.removeAttribute("src");
-			audioEl.load();
-			audioEl = null;
-		}
-		if (audioCtx) {
-			try {
-				await audioCtx.close();
-			} catch {
-				/* ignore */
-			}
-			audioCtx = null;
-		}
-		if (audioUrl) {
-			URL.revokeObjectURL(audioUrl);
-			audioUrl = null;
-		}
-	};
-
 	const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 
 	return {
-		async add(frame) {
-			if (useStamps) {
-				if (!started) {
-					const generator = new MediaStreamTrackGenerator({ kind: "video" });
-					stampWriter = generator.writable.getWriter();
-					await startRecorder(new MediaStream([generator]));
-					started = true;
-				}
-				const vf = new VideoFrame(canvas, {
-					timestamp: frameIndex * frameDurationUs,
-					duration: frameDurationUs,
-				});
-				frameIndex += 1;
-				await stampWriter.write(vf);
-				vf.close();
-				return;
-			}
+		async add(_frame) {
+			// Compressed snapshot (palette art -> tiny PNG). Nothing waits on the queue,
+			// so quantizing can never deadlock and memory stays small.
+			queue.push(await canvasToBlob(canvas, "image/png"));
+		},
 
-			// Gecko / fallback: queue processed frames, encode at fixed FPS in finish().
-			if (!started) started = true;
-			let bitmap = null;
-			try {
-				bitmap = await createImageBitmap(canvas);
-			} catch {
-				const copy = document.createElement("canvas");
-				copy.width = width;
-				copy.height = height;
-				copy.getContext("2d").drawImage(canvas, 0, 0);
-				bitmap = copy;
-			}
-			queue.push(bitmap);
-			// Bound memory on long clips (Gecko is often more RAM-limited).
-			const maxQueue = gecko ? Math.max(24, Math.ceil(fps * 1.5)) : Math.max(48, Math.ceil(fps * 2));
-			while (queue.length > maxQueue) await sleep(frameDurationMs);
+		abort() {
+			queue.length = 0;
 		},
 
 		finish: async () => {
-			if (useStamps) {
-				if (stampWriter) {
-					try {
-						await stampWriter.close();
-					} catch {
-						/* ignore */
-					}
-					stampWriter = null;
-				}
-				if (frameIndex > 0) await sleep(Math.min(200, frameDurationMs * 2));
-				if (recorder && recorder.state !== "inactive") recorder.stop();
-				if (stopped) await stopped;
-				if (stream) stream.getTracks().forEach((t) => t.stop());
-				await cleanupAudio();
-				const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
-				if (!blob.size)
-					throw new Error(`${extension.toUpperCase()} recording produced an empty file.`);
-				return blob;
-			}
-
 			if (!queue.length)
 				throw new Error(`${extension.toUpperCase()} recording produced no frames.`);
 
-			const playCtx = canvas.getContext("2d");
-			// Gecko: captureStream(fps) paces samples; also call requestFrame when present.
-			let mediaStream =
-				typeof canvas.captureStream === "function"
-					? canvas.captureStream(gecko ? fps : 0)
-					: null;
-			if (!mediaStream)
-				throw new Error("canvas.captureStream is not available in this browser.");
+			const frameCount = queue.length;
+			// Equal spacing across the whole source duration (not per-frame wall delays).
+			const stepMs = sourceDurationMs / frameCount;
+
+			const encodeCanvas = document.createElement("canvas");
+			encodeCanvas.width = width;
+			encodeCanvas.height = height;
+			const encodeCtx = encodeCanvas.getContext("2d", { alpha: true });
+			// captureStream(0) + requestFrame: we own every sample instant.
+			// Fallback captureStream(fps) if requestFrame is missing (older Gecko).
+			const hasRequestFrame =
+				typeof MediaStreamTrack.prototype.requestFrame === "function";
+			let mediaStream = encodeCanvas.captureStream(hasRequestFrame ? 0 : fps);
 			const track = mediaStream.getVideoTracks()[0];
-			mediaStream = await setupAudioRealtime(mediaStream);
-			await startRecorder(mediaStream);
-			if (audioEl) {
+
+			let audioCtx = null;
+			let audioSource = null;
+			if (keepAudio) {
 				try {
-					audioEl.currentTime = 0;
-					await audioEl.play();
-				} catch {
-					/* ignore */
-				}
-			}
-
-			const start = performance.now();
-			const total = queue.length;
-			for (let i = 0; i < total; i += 1) {
-				const bmp = queue[i];
-				playCtx.globalCompositeOperation = "copy";
-				playCtx.drawImage(bmp, 0, 0, width, height);
-				if (typeof bmp.close === "function") {
-					try {
-						bmp.close();
-					} catch {
-						/* ignore */
+					const pcm = await decodeSourceAudio(options);
+					if (pcm) {
+						audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+						const dest = audioCtx.createMediaStreamDestination();
+						audioSource = audioCtx.createBufferSource();
+						audioSource.buffer = pcm;
+						audioSource.connect(dest);
+						mediaStream = new MediaStream([
+							...mediaStream.getVideoTracks(),
+							...dest.stream.getAudioTracks(),
+						]);
 					}
+				} catch {
+					/* video-only still encodes */
 				}
-				if (track && typeof track.requestFrame === "function") track.requestFrame();
-				const target = (i + 1) * frameDurationMs;
-				const wait = target - (performance.now() - start);
-				if (wait > 1) await sleep(wait);
 			}
-			const targetTotal =
-				options.duration && options.duration > 0
-					? options.duration * 1000
-					: expectedFrames * frameDurationMs;
-			const remain = targetTotal - (performance.now() - start);
-			if (remain > 1) await sleep(remain);
 
-			if (recorder && recorder.state !== "inactive") recorder.stop();
-			if (stopped) await stopped;
-			if (stream) stream.getTracks().forEach((t) => t.stop());
+			const chunks = [];
+			let recorder;
+			const recOpts = { mimeType };
+			if (!gecko) recOpts.videoBitsPerSecond = 4e6;
+			try {
+				recorder = new MediaRecorder(mediaStream, recOpts);
+			} catch {
+				recorder = new MediaRecorder(mediaStream, {
+					mimeType: mimeType.split(";")[0],
+				});
+			}
+			const stopped = new Promise((resolve, reject) => {
+				recorder.addEventListener("dataavailable", (event) => {
+					if (event.data?.size) chunks.push(event.data);
+				});
+				recorder.addEventListener("stop", resolve, { once: true });
+				recorder.addEventListener(
+					"error",
+					() => reject(new Error(`${extension.toUpperCase()} recording failed.`)),
+					{ once: true },
+				);
+			});
+
+			// Draw frame 0 before starting so the first captured sample is valid.
+			const drawQueued = async (index) => {
+				const bitmap = await createImageBitmap(queue[index]);
+				encodeCtx.globalCompositeOperation = "copy";
+				encodeCtx.drawImage(bitmap, 0, 0, width, height);
+				bitmap.close();
+				queue[index] = null;
+			};
+			await drawQueued(0);
+			try {
+				recorder.start(gecko ? 250 : 100);
+			} catch {
+				recorder.start();
+			}
+			// Let the recorder arm before the timeline starts.
+			await sleep(gecko ? 50 : 20);
+
+			// Start audio on the audio clock at a known instant and anchor the frame timeline
+			// to that same instant (the old play()-then-measure order left audio early by the
+			// play() latency).
+			let t0 = performance.now();
+			if (audioSource) {
+				try {
+					await audioCtx.resume();
+					const when = audioCtx.currentTime + 0.12;
+					audioSource.start(when);
+					t0 = performance.now() + (when - audioCtx.currentTime) * 1000;
+				} catch {
+					/* ignore autoplay blocks */
+				}
+			}
+			const waitUntil = async (absMs) => {
+				for (;;) {
+					const left = absMs - performance.now();
+					if (left <= 0) return;
+					// rAF keeps us aligned with display; short sleep avoids spin.
+					await Promise.race([
+						new Promise((r) => requestAnimationFrame(r)),
+						sleep(Math.min(left, 12)),
+					]);
+				}
+			};
+
+			for (let i = 0; i < frameCount; i += 1) {
+				if (i > 0) await drawQueued(i);
+				// Absolute timeline: frame i is emitted at t0 + i*stepMs.
+				await waitUntil(t0 + i * stepMs);
+				if (hasRequestFrame && track.requestFrame) track.requestFrame();
+			}
+
+			// Hold through the full source duration so container length matches.
+			await waitUntil(t0 + sourceDurationMs);
+			if (hasRequestFrame && track.requestFrame) track.requestFrame();
+			await sleep(Math.max(40, stepMs * 0.25));
+
+			if (recorder.state !== "inactive") recorder.stop();
+			await stopped;
 			mediaStream.getTracks().forEach((t) => t.stop());
-			await cleanupAudio();
+
+			try {
+				audioSource?.stop();
+			} catch {
+				/* not started */
+			}
+			try {
+				await audioCtx?.close();
+			} catch {
+				/* ignore */
+			}
+
 			const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
 			if (!blob.size)
 				throw new Error(`${extension.toUpperCase()} recording produced an empty file.`);
 			return blob;
+		},
+	};
+}
+
+//muxer:begin
+function ebmlUint(value) {
+	const bytes = [];
+	let rest = Math.max(0, Math.floor(value));
+	do {
+		bytes.unshift(rest % 256);
+		rest = Math.floor(rest / 256);
+	} while (rest > 0);
+	return Uint8Array.from(bytes);
+}
+
+function ebmlSize(size) {
+	let length = 1;
+	while (length < 8 && size >= 2 ** (7 * length) - 1) length += 1;
+	const out = new Uint8Array(length);
+	let rest = size;
+	for (let i = length - 1; i >= 0; i -= 1) {
+		out[i] = rest % 256;
+		rest = Math.floor(rest / 256);
+	}
+	out[0] |= 1 << (8 - length);
+	return out;
+}
+
+function ebmlJoin(parts) {
+	let total = 0;
+	for (const part of parts) total += part.length;
+	const out = new Uint8Array(total);
+	let offset = 0;
+	for (const part of parts) {
+		out.set(part, offset);
+		offset += part.length;
+	}
+	return out;
+}
+
+function ebmlElement(id, payload) {
+	return ebmlJoin([ebmlUint(id), ebmlSize(payload.length), payload]);
+}
+
+/** OpusHead (19 bytes): taken from the encoder when given, otherwise synthesized. */
+function opusHead(description, channels, rate) {
+	if (description && description.length >= 19 && description[0] === 0x4f) return description;
+	const head = new Uint8Array(19);
+	head.set([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64, 1, channels]);
+	const view = new DataView(head.buffer);
+	view.setUint16(10, 312, true);
+	view.setUint32(12, rate, true);
+	return head;
+}
+
+/**
+ * Whole WebM/Matroska file from encoded blocks.
+ * blocks: { track: 1 video | 2 audio, us, key, data } ; audio: { head, channels, rate }
+ */
+function buildWebm({ docType, codecId, width, height, durationMs, frameDurationMs, blocks, audio }) {
+	const text = (value) => new TextEncoder().encode(value);
+	const float64 = (value) => {
+		const bytes = new Uint8Array(8);
+		new DataView(bytes.buffer).setFloat64(0, value);
+		return bytes;
+	};
+	const el = ebmlElement;
+	const uint = ebmlUint;
+	const header = el(0x1a45dfa3, ebmlJoin([
+		el(0x4286, uint(1)), el(0x42f7, uint(1)), el(0x42f2, uint(4)), el(0x42f3, uint(8)),
+		el(0x4282, text(docType)), el(0x4287, uint(4)), el(0x4285, uint(2)),
+	]));
+	const info = el(0x1549a966, ebmlJoin([
+		el(0x2ad7b1, uint(1000000)), el(0x4489, float64(durationMs)),
+		el(0x4d80, text("pic2mkcapix")), el(0x5741, text("pic2mkcapix")),
+	]));
+	const entries = [el(0xae, ebmlJoin([
+		el(0xd7, uint(1)), el(0x73c5, uint(1)), el(0x83, uint(1)), el(0x9c, uint(0)),
+		el(0x86, text(codecId)), el(0x23e383, uint(Math.round(frameDurationMs * 1e6))),
+		el(0xe0, ebmlJoin([el(0xb0, uint(width)), el(0xba, uint(height))])),
+	]))];
+	if (audio) {
+		const preSkip = new DataView(audio.head.buffer, audio.head.byteOffset).getUint16(10, true);
+		entries.push(el(0xae, ebmlJoin([
+			el(0xd7, uint(2)), el(0x73c5, uint(2)), el(0x83, uint(2)), el(0x9c, uint(0)),
+			el(0x86, text("A_OPUS")), el(0x63a2, audio.head),
+			el(0x56aa, uint(Math.round((preSkip / 48000) * 1e9))), el(0x56bb, uint(80000000)),
+			el(0xe1, ebmlJoin([el(0xb5, float64(audio.rate)), el(0x9f, uint(audio.channels))])),
+		])));
+	}
+	const tracks = el(0x1654ae6b, ebmlJoin(entries));
+	const clusters = [];
+	let group = null;
+	const closeGroup = () => {
+		if (group) clusters.push(el(0x1f43b675, ebmlJoin(group.parts)));
+		group = null;
+	};
+	for (const block of blocks) {
+		const time = Math.round(block.us / 1000);
+		if (!group || (block.track === 1 && block.key && group.parts.length > 1) || time - group.start > 30000) {
+			closeGroup();
+			group = { start: time, parts: [el(0xe7, uint(time))] };
+		}
+		const rel = time - group.start;
+		const head = new Uint8Array([0x80 | block.track, (rel >> 8) & 255, rel & 255, block.key ? 0x80 : 0]);
+		group.parts.push(el(0xa3, ebmlJoin([head, block.data])));
+	}
+	closeGroup();
+	return ebmlJoin([header, el(0x18538067, ebmlJoin([info, tracks, ...clusters]))]);
+}
+
+/**
+ * MP4 / MOV (ISO BMFF) file: ftyp + mdat + moov, one chunk per track.
+ * tracks: { kind: "vide"|"soun", timescale, samples: [{ data, dts, dur, key }], entry (stsd child box),
+ *           width, height }
+ */
+function buildMp4({ brand, tracks }) {
+	const u32 = (v) => {
+		const b = new Uint8Array(4);
+		new DataView(b.buffer).setUint32(0, v >>> 0);
+		return b;
+	};
+	const u16 = (v) => Uint8Array.from([(v >> 8) & 255, v & 255]);
+	const str = (s) => Uint8Array.from([...s].map((c) => c.charCodeAt(0)));
+	const zeros = (n) => new Uint8Array(n);
+	const box = (type, ...parts) => {
+		const body = ebmlJoin(parts);
+		return ebmlJoin([u32(body.length + 8), str(type), body]);
+	};
+	const full = (type, flags, ...parts) => box(type, u32(flags), ...parts);
+	const matrix = ebmlJoin([0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000].map(u32));
+	const isMov = brand === "qt  ";
+	const ftyp = box("ftyp", str(brand), u32(isMov ? 0x200 : 0x200), ...(isMov ? [str("qt  ")] : ["isom", "iso2", "avc1", "mp41"].map(str)));
+	let dataBytes = 0;
+	for (const t of tracks) for (const s of t.samples) dataBytes += s.data.length;
+	const mdat = ebmlJoin([u32(dataBytes + 8), str("mdat"), ...tracks.flatMap((t) => t.samples.map((s) => s.data))]);
+	let offset = ftyp.length + 8;
+	const movieMs = Math.max(...tracks.map((t) => Math.round((t.samples.reduce((n, s) => n + s.dur, 0) * 1000) / t.timescale)));
+	const traks = tracks.map((t, index) => {
+		const durTs = t.samples.reduce((n, s) => n + s.dur, 0);
+		const trackMs = Math.round((durTs * 1000) / t.timescale);
+		const runs = [];
+		for (const s of t.samples) {
+			const last = runs[runs.length - 1];
+			if (last && last[1] === s.dur) last[0] += 1;
+			else runs.push([1, s.dur]);
+		}
+		const keys = [];
+		t.samples.forEach((s, i) => s.key && keys.push(i + 1));
+		const chunkOffset = offset;
+		offset += t.samples.reduce((n, s) => n + s.data.length, 0);
+		const stbl = box("stbl",
+			full("stsd", 0, u32(1), t.entry),
+			full("stts", 0, u32(runs.length), ...runs.flatMap(([c, d]) => [u32(c), u32(d)])),
+			...(t.kind === "vide" ? [full("stss", 0, u32(keys.length), ...keys.map(u32))] : []),
+			full("stsc", 0, u32(1), u32(1), u32(t.samples.length), u32(1)),
+			full("stsz", 0, u32(0), u32(t.samples.length), ...t.samples.map((s) => u32(s.data.length))),
+			full("stco", 0, u32(1), u32(chunkOffset)));
+		const minf = box("minf",
+			t.kind === "vide" ? full("vmhd", 1, zeros(8)) : full("smhd", 0, zeros(4)),
+			box("dinf", full("dref", 0, u32(1), full("url ", 1))), stbl);
+		return box("trak",
+			full("tkhd", 7, u32(0), u32(0), u32(index + 1), u32(0), u32(trackMs), zeros(8), u16(0), u16(0),
+				u16(t.kind === "soun" ? 0x100 : 0), u16(0), matrix, u32((t.width || 0) * 65536), u32((t.height || 0) * 65536)),
+			box("mdia",
+				full("mdhd", 0, u32(0), u32(0), u32(t.timescale), u32(durTs), u16(0x55c4), u16(0)),
+				full("hdlr", 0, u32(0), str(t.kind), zeros(12), str(t.kind === "vide" ? "VideoHandler\0" : "SoundHandler\0")),
+				minf));
+	});
+	const moov = box("moov",
+		full("mvhd", 0, u32(0), u32(0), u32(1000), u32(movieMs), u32(0x10000), u16(0x100), zeros(10), matrix, zeros(24), u32(tracks.length + 1)),
+		...traks);
+	return ebmlJoin([ftyp, mdat, moov]);
+}
+
+/** stsd child boxes. */
+function mp4VideoEntry(width, height, avcC) {
+	const u16 = (v) => Uint8Array.from([(v >> 8) & 255, v & 255]);
+	const u32 = (v) => Uint8Array.from([(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]);
+	const wrap = (type, ...parts) => {
+		const body = ebmlJoin(parts);
+		return ebmlJoin([u32(body.length + 8), Uint8Array.from([...type].map((c) => c.charCodeAt(0))), body]);
+	};
+	return wrap("avc1", new Uint8Array(6), u16(1), new Uint8Array(16), u16(width), u16(height),
+		u32(0x480000), u32(0x480000), u32(0), u16(1), new Uint8Array(32), u16(0x18), u16(0xffff), wrap("avcC", avcC));
+}
+
+function mp4AudioEntry(kind, channels, rate, description) {
+	const u16 = (v) => Uint8Array.from([(v >> 8) & 255, v & 255]);
+	const u32 = (v) => Uint8Array.from([(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]);
+	const wrap = (type, ...parts) => {
+		const body = ebmlJoin(parts);
+		return ebmlJoin([u32(body.length + 8), Uint8Array.from([...type].map((c) => c.charCodeAt(0))), body]);
+	};
+	let child;
+	if (kind === "aac") {
+		const dsi = ebmlJoin([Uint8Array.from([5, description.length]), description]);
+		const dcd = ebmlJoin([Uint8Array.from([4, 13 + dsi.length, 0x40, 0x15, 0, 0, 0]), u32(0), u32(0), dsi]);
+		const es = ebmlJoin([Uint8Array.from([3, 3 + dcd.length + 3, 0, 0, 0]), dcd, Uint8Array.from([6, 1, 2])]);
+		child = wrap("esds", u32(0), es);
+	} else {
+		const head = opusHead(description, channels, rate);
+		const view = new DataView(head.buffer, head.byteOffset);
+		child = wrap("dOps", Uint8Array.from([0, head[9]]), u16(view.getUint16(10, true)), u32(view.getUint32(12, true)), u16(view.getInt16(16, true) & 0xffff), Uint8Array.from([head[18]]));
+	}
+	return wrap(kind === "aac" ? "mp4a" : "Opus", new Uint8Array(6), u16(1), new Uint8Array(8), u16(channels), u16(16), u16(0), u16(0), u32(rate * 65536), child);
+}
+//muxer:end
+
+/** Decode the source file's audio track (48 kHz). Resolves to null when there is none. */
+async function decodeSourceAudio(options) {
+	const Context = window.AudioContext || window.webkitAudioContext;
+	let context = null;
+	try {
+		context = new Context({ sampleRate: 48000 });
+		return await context.decodeAudioData(options.audioBuffer.slice(0));
+	} catch {
+		return null;
+	} finally {
+		try {
+			await context?.close();
+		} catch {
+			/* ignore */
+		}
+	}
+}
+
+async function encodeAudioTrack(pcm, config, limitUs) {
+	const rate = 48000;
+	const channels = config.numberOfChannels;
+	const chunks = [];
+	let failure = null;
+	let description = null;
+	const encoder = new AudioEncoder({
+		output: (chunk, meta) => {
+			const data = new Uint8Array(chunk.byteLength);
+			chunk.copyTo(data);
+			const given = meta?.decoderConfig?.description;
+			if (given && !description) {
+				description = ArrayBuffer.isView(given)
+					? new Uint8Array(given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength))
+					: new Uint8Array(given.slice(0));
+			}
+			chunks.push({ track: 2, us: chunk.timestamp, dur: chunk.duration || 0, key: true, data });
+		},
+		error: (error) => {
+			failure = error;
+		},
+	});
+	encoder.configure(config);
+	const total = Math.min(pcm.length, Math.floor((limitUs * rate) / 1e6));
+	const step = rate / 2;
+	for (let start = 0; start < total; start += step) {
+		const count = Math.min(step, total - start);
+		const planar = new Float32Array(count * channels);
+		for (let c = 0; c < channels; c += 1) {
+			const source = pcm.getChannelData(Math.min(c, pcm.numberOfChannels - 1));
+			planar.set(source.subarray(start, start + count), c * count);
+		}
+		const audioData = new AudioData({
+			format: "f32-planar",
+			sampleRate: rate,
+			numberOfFrames: count,
+			numberOfChannels: channels,
+			timestamp: Math.round((start * 1e6) / rate),
+			data: planar,
+		});
+		encoder.encode(audioData);
+		audioData.close();
+		while (encoder.encodeQueueSize > 8 && !failure) await new Promise((r) => setTimeout(r, 2));
+		if (failure) throw failure;
+	}
+	await encoder.flush();
+	if (failure) throw failure;
+	encoder.close();
+	for (const chunk of chunks) if (!chunk.dur) chunk.dur = Math.round(((config.codec === "opus" ? 960 : 1024) * 1e6) / rate);
+	return { chunks, description, channels, rate };
+}
+
+/**
+ * Streaming encoder: each processed frame goes straight into WebCodecs with an
+ * explicit timestamp - no frame queue, no real-time recording. Only compressed
+ * chunks are kept until finish(). Handles webm/mkv (VP9/VP8 + Opus) and mp4/mov
+ * (H.264 + AAC/Opus). Resolves to null when this browser/size cannot do it, so the
+ * caller can fall back to MediaRecorder.
+ */
+async function createWebCodecsWriter(extension, options) {
+	const isMp4 = extension === "mp4" || extension === "mov";
+	const width = Math.max(1, options.width || canvas.width || 1);
+	const height = Math.max(1, options.height || canvas.height || 1);
+	const encWidth = isMp4 ? width + (width & 1) : width;
+	const encHeight = isMp4 ? height + (height & 1) : height;
+	let fps = Number(options.fps) || 0;
+	if (!fps && options.duration && options.frameCount) fps = options.frameCount / options.duration;
+	if (!fps || !Number.isFinite(fps)) fps = 30;
+	fps = Math.min(120, Math.max(1, fps));
+	const bitrate = Math.round(Math.min(40e6, Math.max(1e6, encWidth * encHeight * fps * 0.6)));
+	let config = null;
+	const codecs = isMp4
+		? ["avc1.640033", "avc1.64002A", "avc1.4d0028", "avc1.42E01F", "avc1.42001E"]
+		: ["vp09.00.10.08", "vp8"];
+	for (const codec of codecs) {
+		const candidate = { codec, width: encWidth, height: encHeight, bitrate, framerate: fps, latencyMode: isMp4 ? "realtime" : "quality" };
+		if (isMp4) candidate.avc = { format: "avc" };
+		try {
+			const support = await VideoEncoder.isConfigSupported(candidate);
+			if (support?.supported) {
+				config = candidate;
+				break;
+			}
+		} catch {
+			/* try next codec */
+		}
+	}
+	if (!config) return null;
+
+	// Audio: decide now so an unsupported audio encoder falls back before any frame is encoded.
+	let pcm = null;
+	let audioConfig = null;
+	if (options.keepAudio && options.audioBuffer) {
+		if (typeof AudioEncoder !== "function" || typeof AudioData !== "function") return null;
+		pcm = await decodeSourceAudio(options);
+		if (pcm) {
+			const channels = Math.min(2, pcm.numberOfChannels);
+			const base = { sampleRate: 48000, numberOfChannels: channels, bitrate: 128000 };
+			const tries = isMp4 ? [{ ...base, codec: "mp4a.40.2", aac: { format: "aac" } }, { ...base, codec: "opus" }] : [{ ...base, codec: "opus" }];
+			for (const candidate of tries) {
+				try {
+					const support = await AudioEncoder.isConfigSupported(candidate);
+					if (support?.supported) {
+						audioConfig = candidate;
+						break;
+					}
+				} catch {
+					/* try next */
+				}
+			}
+			if (!audioConfig) return null;
+		}
+	}
+
+	const stage = encWidth !== width || encHeight !== height ? Object.assign(document.createElement("canvas"), { width: encWidth, height: encHeight }) : null;
+	const blocks = [];
+	let avcC = null;
+	let failure = null;
+	let nextUs = 0;
+	let count = 0;
+	let lastDelayUs = 0;
+	let exactUs = 0;
+	const encoder = new VideoEncoder({
+		output: (chunk, meta) => {
+			const data = new Uint8Array(chunk.byteLength);
+			chunk.copyTo(data);
+			const given = meta?.decoderConfig?.description;
+			if (given && !avcC) avcC = new Uint8Array(ArrayBuffer.isView(given) ? given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength) : given.slice(0));
+			blocks.push({ track: 1, us: chunk.timestamp, key: chunk.type === "key", data });
+		},
+		error: (error) => {
+			failure = error;
+		},
+	});
+	encoder.configure(config);
+	const keyInterval = Math.max(1, Math.round(fps * 2));
+	return {
+		async add(frame) {
+			if (failure) throw failure;
+			const startUs = Math.round(exactUs);
+			exactUs += Math.max(1000, (frame.delay || 1000 / fps) * 1000);
+			const delayUs = Math.max(1, Math.round(exactUs) - startUs);
+			let source = canvas;
+			if (stage) {
+				const stageCtx = stage.getContext("2d");
+				stageCtx.clearRect(0, 0, encWidth, encHeight);
+				stageCtx.drawImage(canvas, 0, 0);
+				source = stage;
+			}
+			const videoFrame = new VideoFrame(source, { timestamp: startUs, duration: delayUs });
+			nextUs = startUs + delayUs;
+			lastDelayUs = delayUs;
+			try {
+				encoder.encode(videoFrame, { keyFrame: count % keyInterval === 0 });
+			} finally {
+				videoFrame.close();
+			}
+			count += 1;
+			while (encoder.encodeQueueSize > 4 && !failure) await new Promise((r) => setTimeout(r, 2));
+			if (failure) throw failure;
+		},
+		async finish() {
+			await encoder.flush();
+			if (failure) throw failure;
+			encoder.close();
+			if (!blocks.length) throw new Error(`${extension.toUpperCase()} recording produced no frames.`);
+			const audio = pcm && audioConfig ? await encodeAudioTrack(pcm, audioConfig, nextUs) : null;
+			if (isMp4) {
+				if (!avcC) throw new Error("H.264 encoder did not provide its decoder configuration.");
+				const scale = 90000;
+				const video = blocks.map((b, i) => {
+					const dts = Math.round((b.us * scale) / 1e6);
+					const end = Math.round(((i + 1 < blocks.length ? blocks[i + 1].us : b.us + lastDelayUs) * scale) / 1e6);
+					return { data: b.data, key: b.key, dts, dur: Math.max(1, end - dts) };
+				});
+				const tracks = [{ kind: "vide", timescale: scale, samples: video, width: encWidth, height: encHeight, entry: mp4VideoEntry(encWidth, encHeight, avcC) }];
+				if (audio) {
+					const isAac = audioConfig.codec !== "opus";
+					tracks.push({
+						kind: "soun",
+						timescale: audio.rate,
+						samples: audio.chunks.map((c) => ({ data: c.data, key: true, dur: Math.max(1, Math.round((c.dur * audio.rate) / 1e6)) })),
+						entry: mp4AudioEntry(isAac ? "aac" : "opus", audio.channels, audio.rate, audio.description),
+					});
+				}
+				const bytes = buildMp4({ brand: extension === "mov" ? "qt  " : "isom", tracks });
+				return new Blob([bytes], { type: extension === "mov" ? "video/quicktime" : "video/mp4" });
+			}
+			const isMkv = extension === "mkv";
+			const all = audio ? blocks.concat(audio.chunks) : blocks;
+			all.sort((a, b) => a.us - b.us);
+			const bytes = buildWebm({
+				docType: isMkv ? "matroska" : "webm",
+				codecId: config.codec.startsWith("vp09") ? "V_VP9" : "V_VP8",
+				width,
+				height,
+				durationMs: nextUs / 1000,
+				frameDurationMs: nextUs / 1000 / count,
+				blocks: all,
+				audio: audio ? { head: opusHead(audio.description, audio.channels, audio.rate), channels: audio.channels, rate: audio.rate } : null,
+			});
+			return new Blob([bytes], { type: isMkv ? "video/x-matroska" : "video/webm" });
+		},
+		abort() {
+			try {
+				encoder.close();
+			} catch {
+				/* already closed */
+			}
+		},
+	};
+}
+
+/** Streaming WebCodecs path first; MediaRecorder fallback (with a visible note) otherwise. */
+function createVideoStreamWriter(extension, options = {}) {
+	const eligible =
+		["webm", "mkv", "mp4", "mov"].includes(extension) &&
+		typeof VideoEncoder === "function" &&
+		typeof VideoFrame === "function";
+	let impl = null;
+	const pick = async () => {
+		impl = eligible ? await createWebCodecsWriter(extension, options) : null;
+		if (!impl) {
+			if (typeof addToSessionLog === "function")
+				addToSessionLog("VIDEO", `WebCodecs cannot encode ${extension.toUpperCase()}${options.keepAudio ? " with audio" : ""} here; using the MediaRecorder fallback.`);
+			impl = createRecorderVideoWriter(extension, options);
+		}
+	};
+	return {
+		async add(frame) {
+			if (!impl) await pick();
+			return impl.add(frame);
+		},
+		async finish() {
+			if (!impl) await pick();
+			return impl.finish();
+		},
+		abort() {
+			impl?.abort?.();
 		},
 	};
 }
@@ -4563,7 +5003,7 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 		const samples = duration > 0 ? 32 : 1;
 		for (let i = 0; i < samples; i += 1) {
 			const t = duration ? Math.min((i / samples) * duration, Math.max(0, duration - 0.001)) : 0;
-			await VideoDecoder.waitSeek(video, t);
+			await MediaVideoDecoder.waitSeek(video, t);
 			ctx.globalCompositeOperation = "copy";
 			ctx.clearRect(0, 0, width, height);
 			ctx.drawImage(video, 0, 0, width, height);
@@ -5453,6 +5893,7 @@ async function processAnimation(e, t) {
 	c.startAnimation();
 	let u = null,
 		d = 0;
+	try {
 	for await (const a of n) {
 		throwIfStopRequested();
 		const n = d + 1,
@@ -5531,6 +5972,10 @@ async function processAnimation(e, t) {
 			(setProcessingStatusLine("graphics", `Processing frame ${d}${i}...`)),
 			releaseFrame(a),
 			await yieldOutputFrame());
+	}
+	} catch (failure) {
+		r.abort?.();
+		throw failure;
 	}
 	if (!d) throw new Error("Animation stream returned no frames.");
 	(c.finishAnimation(),
