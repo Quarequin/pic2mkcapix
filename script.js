@@ -3038,17 +3038,21 @@ async function decodeAnimation(e, t) {
 	}
 	if (r.startsWith("video/")) {
 		const decoder = new VideoDecoder(e, r);
-		return {
+		const source = {
 			frameCount: null,
 			repeat: 0,
 			duration: null,
+			fps: null,
 			open: async () => {
 				const stream = await decoder.open();
-				// Publish counts back for status / progress labels.
-				if (stream.frameCount) decoder.frameCount = stream.frameCount;
+				// Publish timing back so encode can match source speed.
+				if (stream.frameCount) source.frameCount = stream.frameCount;
+				if (stream.duration != null) source.duration = stream.duration;
+				if (stream.fps) source.fps = stream.fps;
 				return stream;
 			},
 		};
+		return source;
 	}
 	if ("image/jxl" === r) return frameArraySource(await decodeJXL(e));
 	if ("image/webp" === r) throw new Error("Animated WebP requires browser ImageDecoder support.");
@@ -3328,35 +3332,81 @@ function createApngStreamWriter(e) {
 	};
 }
 
+/** True for Firefox / Waterfox / other pure-Gecko builds (not Chromium). */
+function isGeckoEngine() {
+	if (typeof navigator === "undefined") return false;
+	const ua = navigator.userAgent || "";
+	// Brave/Chrome/Edge include "Chrome"; pure Gecko builds do not.
+	if (/Chrome\/|Chromium\/|Edg\/|OPR\//i.test(ua)) return false;
+	return /Gecko\//i.test(ua) || /(?:Firefox|Waterfox|PaleMoon|Iceweasel|IceCat)\//i.test(ua);
+}
+
 function videoMimeCandidates(extension) {
+	const gecko = isGeckoEngine();
+	// Gecko records WebM/VP8(+Opus) most reliably; VP9/mp4 support varies by build.
+	const webm = gecko
+		? [
+				"video/webm;codecs=vp8,opus",
+				"video/webm;codecs=vp8",
+				"video/webm;codecs=vp9,opus",
+				"video/webm;codecs=vp9",
+				"video/webm",
+			]
+		: [
+				"video/webm;codecs=vp9,opus",
+				"video/webm;codecs=vp8,opus",
+				"video/webm;codecs=vp9",
+				"video/webm;codecs=vp8",
+				"video/webm",
+			];
 	return {
-		webm: [
-			"video/webm;codecs=vp9,opus",
-			"video/webm;codecs=vp8,opus",
-			"video/webm;codecs=vp9",
-			"video/webm;codecs=vp8",
-			"video/webm",
-		],
-		mp4: [
-			"video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-			"video/mp4;codecs=avc1.42E01E",
-			"video/mp4",
-		],
-		mkv: ["video/x-matroska", "video/webm"],
-		mov: ["video/quicktime", "video/mp4"],
-	}[extension] || ["video/webm"];
+		webm,
+		mp4: gecko
+			? [
+					// Most Gecko builds cannot MediaRecorder→mp4; fall back to webm.
+					"video/webm;codecs=vp8,opus",
+					"video/webm;codecs=vp8",
+					"video/webm",
+					"video/mp4",
+				]
+			: [
+					"video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+					"video/mp4;codecs=avc1.42E01E",
+					"video/mp4",
+				],
+		mkv: gecko
+			? ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"]
+			: ["video/x-matroska", "video/webm"],
+		mov: gecko
+			? ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"]
+			: ["video/quicktime", "video/mp4"],
+	}[extension] || webm;
 }
 
 function createVideoStreamWriter(extension, options = {}) {
-	if (!canvas.captureStream || typeof MediaRecorder === "undefined")
+	if (typeof MediaRecorder === "undefined")
 		throw new Error(`This browser cannot encode ${extension.toUpperCase()} output.`);
-	const canvasStream = canvas.captureStream(0);
-	const videoTrack = canvasStream.getVideoTracks()[0];
+	if (typeof canvas.captureStream !== "function" && typeof MediaStreamTrackGenerator !== "function")
+		throw new Error(`This browser cannot capture canvas frames for ${extension.toUpperCase()} output.`);
+
+	const width = options.width || canvas.width || 1;
+	const height = options.height || canvas.height || 1;
+	const fps = Math.min(
+		120,
+		Math.max(
+			1,
+			Number(options.fps) ||
+				(options.duration && options.frameCount
+					? options.frameCount / options.duration
+					: 0) ||
+				30,
+		),
+	);
+	const frameDurationUs = Math.max(1, Math.round(1_000_000 / fps));
+	const frameDurationMs = frameDurationUs / 1000;
+	const expectedFrames = Math.max(1, Number(options.frameCount) || 1);
 	const keepAudio = !!(options.keepAudio && options.audioBuffer && options.audioMime);
-	let audioEl = null;
-	let audioUrl = null;
-	let audioCtx = null;
-	let stream = canvasStream;
+	const gecko = isGeckoEngine();
 
 	const candidates = videoMimeCandidates(extension);
 	let mimeType = candidates.find(
@@ -3375,13 +3425,32 @@ function createVideoStreamWriter(extension, options = {}) {
 		);
 		if (withAudio) mimeType = withAudio;
 	}
-	if (!mimeType) {
-		canvasStream.getTracks().forEach((t) => t.stop());
-		throw new Error(`This browser cannot encode ${extension.toUpperCase()} output.`);
-	}
+	if (!mimeType)
+		throw new Error(
+			`This browser cannot encode ${extension.toUpperCase()} output (no supported MediaRecorder MIME type).`,
+		);
 
-	const setupAudio = async () => {
-		if (!keepAudio) return;
+	// Chromium: stamped VideoFrames (timing independent of quantize speed).
+	// Gecko (Waterfox/Firefox): stamps path is incomplete — use queue + fixed-FPS drain.
+	const useStamps =
+		!gecko &&
+		typeof MediaStreamTrackGenerator === "function" &&
+		typeof VideoFrame === "function";
+
+	const chunks = [];
+	let recorder = null;
+	let stopped = null;
+	let started = false;
+	let frameIndex = 0;
+	let stream = null;
+	let stampWriter = null;
+	let audioEl = null;
+	let audioUrl = null;
+	let audioCtx = null;
+	const queue = [];
+
+	const setupAudioRealtime = async (baseStream) => {
+		if (!keepAudio) return baseStream;
 		audioUrl = URL.createObjectURL(
 			new Blob([options.audioBuffer], { type: options.audioMime }),
 		);
@@ -3402,88 +3471,178 @@ function createVideoStreamWriter(extension, options = {}) {
 		const srcNode = audioCtx.createMediaElementSource(audioEl);
 		const dest = audioCtx.createMediaStreamDestination();
 		srcNode.connect(dest);
-		stream = new MediaStream([
-			...canvasStream.getVideoTracks(),
+		return new MediaStream([
+			...baseStream.getVideoTracks(),
 			...dest.stream.getAudioTracks(),
 		]);
 	};
 
-	const chunks = [];
-	let recorder = null;
-	let stopped = null;
-	let started = false;
-	// Wall-clock schedule so MediaRecorder duration tracks source FPS delays,
-	// even when quantize/process time would otherwise stretch the output.
-	let timelineStart = 0;
-	let frameIndex = 0;
-	let timelineMs = 0;
+	const startRecorder = async (mediaStream) => {
+		stream = mediaStream;
+		const recOpts = { mimeType };
+		// Gecko is picky about bitsPerSecond on some builds.
+		if (!gecko) recOpts.videoBitsPerSecond = 4e6;
+		try {
+			recorder = new MediaRecorder(mediaStream, recOpts);
+		} catch {
+			recorder = new MediaRecorder(mediaStream, { mimeType: mimeType.split(";")[0] });
+		}
+		stopped = new Promise((resolve, reject) => {
+			recorder.addEventListener("dataavailable", (event) => {
+				if (event.data?.size) chunks.push(event.data);
+			});
+			recorder.addEventListener("stop", resolve, { once: true });
+			recorder.addEventListener(
+				"error",
+				() => reject(new Error(`${extension.toUpperCase()} recording failed.`)),
+				{ once: true },
+			);
+		});
+		try {
+			recorder.start(gecko ? 250 : 100);
+		} catch {
+			recorder.start();
+		}
+	};
+
+	const cleanupAudio = async () => {
+		if (audioEl) {
+			try {
+				audioEl.pause();
+			} catch {
+				/* ignore */
+			}
+			audioEl.removeAttribute("src");
+			audioEl.load();
+			audioEl = null;
+		}
+		if (audioCtx) {
+			try {
+				await audioCtx.close();
+			} catch {
+				/* ignore */
+			}
+			audioCtx = null;
+		}
+		if (audioUrl) {
+			URL.revokeObjectURL(audioUrl);
+			audioUrl = null;
+		}
+	};
+
+	const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 
 	return {
 		async add(frame) {
-			if (!started) {
-				await setupAudio();
-				recorder = new MediaRecorder(stream, {
-					mimeType,
-					videoBitsPerSecond: 4e6,
+			if (useStamps) {
+				if (!started) {
+					const generator = new MediaStreamTrackGenerator({ kind: "video" });
+					stampWriter = generator.writable.getWriter();
+					await startRecorder(new MediaStream([generator]));
+					started = true;
+				}
+				const vf = new VideoFrame(canvas, {
+					timestamp: frameIndex * frameDurationUs,
+					duration: frameDurationUs,
 				});
-				stopped = new Promise((resolve, reject) => {
-					recorder.addEventListener("dataavailable", (event) => {
-						if (event.data?.size) chunks.push(event.data);
-					});
-					recorder.addEventListener("stop", resolve, { once: true });
-					recorder.addEventListener(
-						"error",
-						() => reject(new Error(`${extension.toUpperCase()} recording failed.`)),
-						{ once: true },
-					);
-				});
-				recorder.start(100);
-				timelineStart = performance.now();
-				frameIndex = 0;
-				timelineMs = 0;
-				if (audioEl) {
+				frameIndex += 1;
+				await stampWriter.write(vf);
+				vf.close();
+				return;
+			}
+
+			// Gecko / fallback: queue processed frames, encode at fixed FPS in finish().
+			if (!started) started = true;
+			let bitmap = null;
+			try {
+				bitmap = await createImageBitmap(canvas);
+			} catch {
+				const copy = document.createElement("canvas");
+				copy.width = width;
+				copy.height = height;
+				copy.getContext("2d").drawImage(canvas, 0, 0);
+				bitmap = copy;
+			}
+			queue.push(bitmap);
+			// Bound memory on long clips (Gecko is often more RAM-limited).
+			const maxQueue = gecko ? Math.max(24, Math.ceil(fps * 1.5)) : Math.max(48, Math.ceil(fps * 2));
+			while (queue.length > maxQueue) await sleep(frameDurationMs);
+		},
+
+		finish: async () => {
+			if (useStamps) {
+				if (stampWriter) {
 					try {
-						audioEl.currentTime = 0;
-						await audioEl.play();
+						await stampWriter.close();
 					} catch {
-						/* autoplay may block; video-only still encodes */
+						/* ignore */
+					}
+					stampWriter = null;
+				}
+				if (frameIndex > 0) await sleep(Math.min(200, frameDurationMs * 2));
+				if (recorder && recorder.state !== "inactive") recorder.stop();
+				if (stopped) await stopped;
+				if (stream) stream.getTracks().forEach((t) => t.stop());
+				await cleanupAudio();
+				const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
+				if (!blob.size)
+					throw new Error(`${extension.toUpperCase()} recording produced an empty file.`);
+				return blob;
+			}
+
+			if (!queue.length)
+				throw new Error(`${extension.toUpperCase()} recording produced no frames.`);
+
+			const playCtx = canvas.getContext("2d");
+			// Gecko: captureStream(fps) paces samples; also call requestFrame when present.
+			let mediaStream =
+				typeof canvas.captureStream === "function"
+					? canvas.captureStream(gecko ? fps : 0)
+					: null;
+			if (!mediaStream)
+				throw new Error("canvas.captureStream is not available in this browser.");
+			const track = mediaStream.getVideoTracks()[0];
+			mediaStream = await setupAudioRealtime(mediaStream);
+			await startRecorder(mediaStream);
+			if (audioEl) {
+				try {
+					audioEl.currentTime = 0;
+					await audioEl.play();
+				} catch {
+					/* ignore */
+				}
+			}
+
+			const start = performance.now();
+			const total = queue.length;
+			for (let i = 0; i < total; i += 1) {
+				const bmp = queue[i];
+				playCtx.globalCompositeOperation = "copy";
+				playCtx.drawImage(bmp, 0, 0, width, height);
+				if (typeof bmp.close === "function") {
+					try {
+						bmp.close();
+					} catch {
+						/* ignore */
 					}
 				}
-				started = true;
+				if (track && typeof track.requestFrame === "function") track.requestFrame();
+				const target = (i + 1) * frameDurationMs;
+				const wait = target - (performance.now() - start);
+				if (wait > 1) await sleep(wait);
 			}
-			if (videoTrack.requestFrame) videoTrack.requestFrame();
-			frameIndex += 1;
-			const step = Math.max(1, Number(frame.delay) || 1000 / 30);
-			timelineMs += step;
-			const wait = timelineMs - (performance.now() - timelineStart);
-			if (wait > 1) {
-				await new Promise((resolve) => setTimeout(resolve, wait));
-			}
-		},
-		finish: async () => {
-			if (audioEl) {
-				try {
-					audioEl.pause();
-				} catch {
-					/* ignore */
-				}
-			}
+			const targetTotal =
+				options.duration && options.duration > 0
+					? options.duration * 1000
+					: expectedFrames * frameDurationMs;
+			const remain = targetTotal - (performance.now() - start);
+			if (remain > 1) await sleep(remain);
+
 			if (recorder && recorder.state !== "inactive") recorder.stop();
 			if (stopped) await stopped;
-			stream.getTracks().forEach((t) => t.stop());
-			canvasStream.getTracks().forEach((t) => t.stop());
-			if (audioCtx) {
-				try {
-					await audioCtx.close();
-				} catch {
-					/* ignore */
-				}
-			}
-			if (audioEl) {
-				audioEl.removeAttribute("src");
-				audioEl.load();
-			}
-			if (audioUrl) URL.revokeObjectURL(audioUrl);
+			if (stream) stream.getTracks().forEach((t) => t.stop());
+			mediaStream.getTracks().forEach((t) => t.stop());
+			await cleanupAudio();
 			const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
 			if (!blob.size)
 				throw new Error(`${extension.toUpperCase()} recording produced an empty file.`);
@@ -5278,6 +5437,8 @@ async function processAnimation(e, t) {
 			height: t,
 			repeat: i,
 			frameCount: o,
+			fps: n.fps || a.fps || null,
+			duration: n.duration || a.duration || null,
 		}),
 		s = engineSelect.value,
 		l = parseInt(asciiWidthInput.value) || 80,
