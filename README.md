@@ -47,11 +47,3 @@ WASM mode now supports Floyd–Steinberg Error Diffusion (`mode 2`) through a tw
 The processing-engine dropdown values are now exactly `script`, `webgl`, and `wasm`; internal pipeline dispatch uses the same values.
 
 The C/WASM quantizer now has separate real matrix paths for Bayer 4×4, 8×8, 16×16 and Blue Noise 8×8, 16×16, 32×32; JavaScript maps each dithering option to its matching WASM mode ID.
-
-## Video output fix (crash during processing)
-
-Root causes fixed: the MediaRecorder writer waited on a frame queue that was only drained after processing finished (permanent hang after ~32-64 frames) and kept every frame as an ImageBitmap (out-of-memory on long clips). WebM/MKV output without audio is now encoded frame-by-frame with WebCodecs `VideoEncoder` (explicit timestamps, faster than real time) and a built-in Matroska muxer. MP4/MOV (H.264 + AAC, or Opus when AAC is unavailable) and "keep original sound" (Opus in WebM/MKV) are also encoded by WebCodecs with built-in ISO-BMFF/Matroska muxers; audio is decoded once and encoded at finish, faster than real time. Support is checked with `isConfigSupported` first. When the browser cannot encode the requested codec/container, the MediaRecorder fallback is used (logged in the session log) and never renames the container. That fallback now stores frames as small PNG blobs and never waits on its own queue. Seeking no longer gives up silently after 250 ms, and encoders are released on error. The local class `VideoDecoder` was renamed `MediaVideoDecoder` to stop shadowing the WebCodecs global.
-
-## Audio/video sync fixes
-
-Seeking now waits for the new frame to be presented (`requestVideoFrameCallback`) and samples the middle of each frame slot on the same grid as the output timeline, so frames are never one step late. WebCodecs timestamps accumulate exactly (no per-frame rounding drift). The MediaRecorder fallback plays audio through a scheduled `AudioBufferSourceNode` and anchors the frame timeline to that start instant instead of measuring time after `play()` returned.
