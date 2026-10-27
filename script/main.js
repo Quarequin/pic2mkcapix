@@ -788,12 +788,13 @@ function bindColorPairEvents(pair, index) {
 
 
 function parseCurrentPalette() {
-	rgbPalette = [{ r: 0, g: 0, b: 0, a: 0 }].concat(
+	primaryPalette = [{ r: 0, g: 0, b: 0, a: 0 }].concat(
 		paletteValues.map((value) => {
 			const color = hexToRgba(value);
 			return { r: color.r, g: color.g, b: color.b, a: color.a };
 		}),
 	);
+	rgbPalette = primaryPalette.map((color) => ({ ...color }));
 }
 
 let temporaryPaletteIndices = null;
@@ -1680,6 +1681,16 @@ function makecodeVariableName(date = new Date()) {
 	);
 }
 
+function mapMakeCodeRow(sourceRow) {
+	if (!sourceRow || !temporaryPaletteIndices?.length || !primaryPalette.length) return "";
+	let line = "";
+	for (const temporaryIndex of sourceRow) {
+		const primaryIndex = temporaryPaletteIndices[temporaryIndex] ?? temporaryIndex;
+		line += CHAR_TABLE[primaryIndex] ?? CHAR_TABLE[0];
+	}
+	return line;
+}
+
 function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled, asciiWidth) {
 	const makecodeWriter = makecodeEnabled ? createStringOutputWriter("makecode") : null;
 	const asciiWriter = createStringOutputWriter("ascii");
@@ -1730,7 +1741,9 @@ function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled,
 			if (row === 0 || textProgress % 8 < 1 || row === height - 1) {
 				setProcessingStatusLine("text", `Processing Text(${textOutputLabel}): ${textProgress}%...`);
 			}
-			makecodeWriter?.appendLine(line);
+			makecodeWriter?.appendLine(
+				mapMakeCodeRow(sourceRow) || line,
+			);
 			if (sourceRow) asciiRows.onSourceRow(row, sourceRow);
 			rowsSinceRender += 1;
 			if (isTextViewerEnabled() && rowsSinceRender >= 40) {
@@ -2497,4 +2510,3 @@ downloadTextButton.addEventListener("click", async function (e) {
 		if (progress) progress.value = 100;
 		if (e) setTimeout(() => e.classList.add("hidden"), 400);
 	}));
-
