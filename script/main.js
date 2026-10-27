@@ -2308,8 +2308,7 @@ function downloadBlob(e, t) {
 			}
 			fr.disabled = false;
 		}
-	}),
-parametersForm.addEventListener("reset", async function (e) {
+	}),parametersForm.addEventListener("reset", async function (e) {
 	e.preventDefault();
 	
 	// 1. รีเซ็ตข้อความสถานะระบบและเคลียร์ไฟล์ที่อัปโหลด
@@ -2401,7 +2400,7 @@ parametersForm.addEventListener("reset", async function (e) {
 	if (typeof applyViewerVisibility === "function") applyViewerVisibility();
 
 	addToSessionLog("SYSTEM", "Form successfully reset to initial state.");
-});
+}));
 
 function getActiveOutputName() {
 	return document.getElementById("tab-ascii").classList.contains("active") ? "ascii" : "makecode";
