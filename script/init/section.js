@@ -212,6 +212,7 @@ let originalImageSize = {
 	originalPreviewObjectUrl = null,
 	outputVideo = null,
 	rgbPalette = [],
+	primaryPalette = [],
 	uploadedFileBuffer = null,
 	isTextProcessing = !1,
 	stopTextProcessingFlag = !1,
