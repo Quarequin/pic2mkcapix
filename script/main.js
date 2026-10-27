@@ -2309,18 +2309,99 @@ function downloadBlob(e, t) {
 			fr.disabled = false;
 		}
 	}),
-	parametersForm.addEventListener("reset", async function (e) {
-		e.preventDefault();
-		document.getElementById("status").textContent =
-			"System Status: Awaiting Image Upload Asset...";
-		resetLoadedState();
+parametersForm.addEventListener("reset", async function (e) {
+	e.preventDefault();
+	
+	// 1. รีเซ็ตข้อความสถานะระบบและเคลียร์ไฟล์ที่อัปโหลด
+	document.getElementById("status").textContent = "System Status: Awaiting Image Upload Asset...";
+	mediaFileInput.value = "";
+	if (palettemediaFileInput) palettemediaFileInput.value = "";
+
+	// 2. เรียกใช้ฟังก์ชันล้างสถานะข้อมูลภาพ/แอนิเมชัน/ผลลัพธ์ที่ประมวลผลไว้
+	resetLoadedState();
+
+	// 3. ล้างพรีวิวภาพต้นฉบับและข้อมูลขนาดความละเอียด (Resolution)
+	const previewZone = document.getElementById("original-preview-zone");
+	if (previewZone) previewZone.replaceChildren();
+	const originalRes = document.getElementById("original-res");
+	if (originalRes) originalRes.textContent = "Size: 0 x 0";
+	const canvasRes = document.getElementById("canvas-res");
+	if (canvasRes) canvasRes.textContent = "Size: 0 x 0";
+
+	// 4. รีเซ็ตค่าฟอร์มและตัวเลือกการตั้งค่าทั้งหมดกลับเป็นค่าเริ่มต้น
+	const originalSizeRadio = document.getElementById("original-size");
+	if (originalSizeRadio) originalSizeRadio.checked = true;
+	const factorInput = document.getElementById("factor");
+	if (factorInput) factorInput.value = "";
+	const ratioCheck = document.getElementById("ratio");
+	if (ratioCheck) ratioCheck.checked = true;
+	const widthInput = document.getElementById("width");
+	if (widthInput) widthInput.value = "";
+	const heightInput = document.getElementById("height");
+	if (heightInput) heightInput.value = "";
+
+	// รีเซ็ตค่า Dithering, Render, และ Engine
+	if (ditheringSelect) ditheringSelect.value = "solid";
+	if (renderSelect) renderSelect.value = "bitmap";
+	if (renderTilePowerInput) renderTilePowerInput.value = "7";
+	if (typeof updateRenderOptionControls === "function") updateRenderOptionControls();
+
+	if (makecodeEnableCheck) {
+		makecodeEnableCheck.checked = true;
+		makecodeEnableCheck.disabled = false;
+	}
+	if (asciiEnableCheck) {
+		asciiEnableCheck.checked = false;
+		if (asciiSubOptions) asciiSubOptions.style.display = "none";
+	}
+	if (asciiTabBtn) asciiTabBtn.disabled = true;
+	if (asciiCharsetSelect) asciiCharsetSelect.value = "standard";
+	if (asciiWidthInput) asciiWidthInput.value = "80";
+
+	if (engineSelect) engineSelect.value = "script";
+	if (typeof updateEngineAvailability === "function") updateEngineAvailability();
+
+	if (videoKeepAudioCheck) videoKeepAudioCheck.checked = false;
+	if (typeof updateVideoOptionsVisibility === "function") updateVideoOptionsVisibility(false);
+
+	// 5. รีเซ็ตสีพาเลตต์ (Palette) กลับเป็นค่าเริ่มต้น (Arcade)
+	if (paletteLimitInput) paletteLimitInput.value = "15";
+	if (predefinedPaletteSelect) {
+		predefinedPaletteSelect.value = "arcade";
+		const customOpt = predefinedPaletteSelect.querySelector('option[value="custom"]');
+		if (customOpt) customOpt.classList.add("hidden");
+	}
+	if (typeof predefinedPalettes !== "undefined" && predefinedPalettes.arcade) {
+		setPaletteValues(predefinedPalettes.arcade);
+	} else if (typeof setPaletteValues === "function") {
+		setPaletteValues([
+			"#ffffff", "#ff2121", "#ff93c4", "#ff8135", "#fff609",
+			"#249ca3", "#78dc52", "#003fad", "#87f2ff", "#8e2ec4",
+			"#a4839f", "#5c406c", "#e5cdc4", "#91463d", "#000000"
+		]);
+	}
+
+	// 6. สลับหน้าจอแท็บผลลัพธ์กลับมาที่ PixelArt เสมอ
+	const pixelartTabBtn = document.querySelector('.tab-btn[data-tab="pixelart"]');
+	if (pixelartTabBtn) pixelartTabBtn.click();
+
+	// 7. ล็อค/ปิดการใช้งานฟิลด์ขนาดภาพ (Size settings) จนกว่าจะมีการอัปโหลดรูปใหม่
+	document.querySelectorAll("#size-settings input").forEach((el) => {
+		el.disabled = true;
+	});
+
+	// 8. ปรับสถานะปุ่มทั้งหมดกลับเป็นโหมดไม่มีรูปภาพ (`noImage`)
+	setButtonState("noImage");
+
+	// 9. ซ่อนกล่องพรีวิวภาพ
+	if (previewContainer) {
 		previewContainer.style.display = "none";
-		const picEnv = document.querySelector(
-			"#original-preview-zone img, #original-preview-zone video, #original-preview-zone canvas",
-		);
-		if (!!picEnv) picEnv.value = null;
-		mediaFileInput.value = null;
-	}));
+		previewContainer.classList.remove("is-visible");
+	}
+	if (typeof applyViewerVisibility === "function") applyViewerVisibility();
+
+	addToSessionLog("SYSTEM", "Form successfully reset to initial state.");
+});
 
 function getActiveOutputName() {
 	return document.getElementById("tab-ascii").classList.contains("active") ? "ascii" : "makecode";
