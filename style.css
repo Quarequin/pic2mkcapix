@@ -472,13 +472,9 @@ div.output img,
 div.output video,
 #output-image {
 	display: block;
-	width: auto;
+	width: 100%;
 	height: auto;
-	max-width: 100%;
-	max-height: min(60vh, 480px);
-	margin: 0 auto;
 	object-fit: contain;
-	object-position: center;
 	image-rendering: pixelated;
 	background-image:
 		linear-gradient(45deg, #222 25%, transparent 25%),
@@ -489,6 +485,7 @@ div.output video,
 	background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
 	background-color: #151515;
 	padding: 5px;
+	margin: 0 auto;
 	box-sizing: border-box;
 	border-radius: 0;
 }
