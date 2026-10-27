@@ -449,7 +449,7 @@ async function loadWasmRuntime() {
 	// Standalone pages opened from file:// (or a stale/invalid comp.wasm)
 	// use the embedded copy, which is always built from the same comp.c.
 	try {
-		const response = await fetch("comp.wasm", { cache: "no-store" });
+		const response = await fetch("comp/comp.wasm", { cache: "no-store" });
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);
 		return await instantiateWasmBytes(await response.arrayBuffer());
 	} catch {
