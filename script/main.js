@@ -807,52 +807,98 @@ function temporaryPaletteLimit() {
 		: 65535;
 }
 
-function finalizeTemporaryPalette(mainPalette, usedMainIndices) {
-	const selected = Array.from(usedMainIndices).sort((left, right) => left - right);
+/**
+ * When the active palette already fits the container limit, keep every slot so
+ * animation quantize sees the same colour set as stills (true-colour fidelity).
+ * Only subset when over the format cap (e.g. GIF 256).
+ */
+function useFullPaletteIfFits(mainPalette) {
 	const limit = temporaryPaletteLimit();
-	if (selected.length > limit) selected.length = limit;
-	if (!selected.includes(0)) selected.unshift(0);
+	if (mainPalette.length <= limit) {
+		temporaryPaletteIndices = mainPalette.map((_, index) => index);
+		rgbPalette = mainPalette;
+		return true;
+	}
+	return false;
+}
+
+function finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts) {
+	const limit = temporaryPaletteLimit();
+	let selected = Array.from(usedMainIndices);
+	if (!selected.includes(0)) selected.push(0);
+	if (selected.length > limit && usageCounts) {
+		// Prefer colours that appear most often across sampled frames.
+		selected.sort(
+			(left, right) =>
+				(usageCounts.get(right) || 0) - (usageCounts.get(left) || 0) || left - right,
+		);
+		selected = selected.slice(0, limit);
+		if (!selected.includes(0)) {
+			selected[selected.length - 1] = 0;
+		}
+	} else if (selected.length > limit) {
+		selected.sort((left, right) => left - right);
+		selected.length = limit;
+		if (!selected.includes(0)) selected.unshift(0);
+	} else {
+		selected.sort((left, right) => left - right);
+	}
 	temporaryPaletteIndices = selected;
 	rgbPalette = temporaryPaletteIndices.map((mainIndex) => mainPalette[mainIndex]);
 }
 
 function selectTemporaryPaletteFromPixels(data) {
 	const mainPalette = rgbPalette;
+	if (useFullPaletteIfFits(mainPalette)) return;
 	const usedMainIndices = new Set([0]);
+	const usageCounts = new Map([[0, 1]]);
 	const cache = new Map();
 	for (let offset = 0; offset < data.length; offset += 4) {
-		if (data[offset + 3] >= 128)
-			usedMainIndices.add(
-				cachedFindNearest(
-					data[offset],
-					data[offset + 1],
-					data[offset + 2],
-					mainPalette,
-					cache,
-				),
-			);
+		if (data[offset + 3] < 128) continue;
+		const index = cachedFindNearest(
+			data[offset],
+			data[offset + 1],
+			data[offset + 2],
+			mainPalette,
+			cache,
+		);
+		usedMainIndices.add(index);
+		usageCounts.set(index, (usageCounts.get(index) || 0) + 1);
 	}
-	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
-function accumulatePaletteFromPixels(pixels, usedMainIndices, mainPalette, cache) {
-	const step = Math.max(4, Math.floor(pixels.length / 4 / 4000) * 4);
+/** Dense scan for animation/video — aims at true-colour coverage, not a 4k sparse grid. */
+function accumulatePaletteFromPixels(pixels, usedMainIndices, mainPalette, cache, usageCounts) {
+	const pixelCount = pixels.length >> 2;
+	// Cap work on huge frames but stay much denser than the old ~4000 samples.
+	const maxSamples = 48000;
+	const step =
+		pixelCount > maxSamples
+			? Math.max(1, Math.floor(pixelCount / maxSamples)) * 4
+			: 4;
 	for (let offset = 0; offset < pixels.length; offset += step) {
-		if (pixels[offset + 3] >= 128)
-			usedMainIndices.add(
-				cachedFindNearest(
-					pixels[offset],
-					pixels[offset + 1],
-					pixels[offset + 2],
-					mainPalette,
-					cache,
-				),
-			);
+		if (pixels[offset + 3] < 128) continue;
+		const index = cachedFindNearest(
+			pixels[offset],
+			pixels[offset + 1],
+			pixels[offset + 2],
+			mainPalette,
+			cache,
+		);
+		usedMainIndices.add(index);
+		if (usageCounts) usageCounts.set(index, (usageCounts.get(index) || 0) + 1);
 	}
 }
 
-/** Video palette prep: seek only to sparse timestamps (avoids decoding every frame twice). */
+/**
+ * Video palette prep: denser timeline samples so intermediate hues are not
+ * dropped before quantize (old path used only 32 seeks).
+ */
 async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
+	const mainPalette = rgbPalette;
+	if (useFullPaletteIfFits(mainPalette)) return;
+
 	const objectUrl = URL.createObjectURL(new Blob([buffer], { type: mimeType }));
 	const video = document.createElement("video");
 	video.src = objectUrl;
@@ -860,7 +906,7 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 	video.playsInline = true;
 	video.preload = "auto";
 	const usedMainIndices = new Set([0]);
-	const mainPalette = rgbPalette;
+	const usageCounts = new Map([[0, 1]]);
 	const cache = new Map();
 	try {
 		await new Promise((resolve, reject) => {
@@ -873,13 +919,22 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 		});
 		const duration =
 			Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-		const samples = duration > 0 ? 32 : 1;
+		// ~2 samples/sec, clamped so short clips still get many frames and long ones stay responsive.
+		const samples =
+			duration > 0 ? Math.min(192, Math.max(48, Math.ceil(duration * 2))) : 1;
 		for (let i = 0; i < samples; i += 1) {
-			const t = duration ? Math.min((i / samples) * duration, Math.max(0, duration - 0.001)) : 0;
+			const t = duration
+				? Math.min((i / samples) * duration, Math.max(0, duration - 0.001))
+				: 0;
 			await MediaVideoDecoder.waitSeek(video, t);
 			const drawn = MediaVideoDecoder.drawFrame(video, width, height);
-			accumulatePaletteFromPixels(drawn.imageData.data, usedMainIndices, mainPalette, cache);
-			// Drop temporary canvas immediately.
+			accumulatePaletteFromPixels(
+				drawn.imageData.data,
+				usedMainIndices,
+				mainPalette,
+				cache,
+				usageCounts,
+			);
 			drawn.image.width = 0;
 			drawn.image.height = 0;
 			if (i % 4 === 0) await yieldOutputFrame();
@@ -890,11 +945,14 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 		video.load();
 		URL.revokeObjectURL(objectUrl);
 	}
-	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
 async function selectTemporaryPaletteFromAnimation(source, width, height) {
-	// Video: sparse seeks only — full frame walks here duplicated processAnimation and felt like a hang.
+	const mainPalette = rgbPalette;
+	// Full palette fits the output format → identical quantize set to still images.
+	if (useFullPaletteIfFits(mainPalette)) return;
+
 	if (
 		uploadedFileBuffer &&
 		String(originalMimeType || "").startsWith("video/")
@@ -911,18 +969,26 @@ async function selectTemporaryPaletteFromAnimation(source, width, height) {
 	const stream = await source.open();
 	if (!stream) throw new Error("Unable to open animation while preparing its temporary palette.");
 	const usedMainIndices = new Set([0]);
-	const mainPalette = rgbPalette;
+	const usageCounts = new Map([[0, 1]]);
 	const cache = new Map();
 	const total = stream.frameCount || source.frameCount || 0;
-	const targetSamples = 32;
-	const stride = total > targetSamples ? Math.max(1, Math.floor(total / targetSamples)) : 1;
+	// Walk every frame when short; otherwise stride so we still cover the whole timeline.
+	const maxFullWalk = 256;
+	const stride =
+		total > maxFullWalk ? Math.max(1, Math.ceil(total / maxFullWalk)) : 1;
 	let index = 0;
 	let sampled = 0;
 	for await (const frame of stream) {
 		if (index % stride === 0) {
 			try {
 				const buf = frameToImageData(frame, width, height);
-				accumulatePaletteFromPixels(buf.data, usedMainIndices, mainPalette, cache);
+				accumulatePaletteFromPixels(
+					buf.data,
+					usedMainIndices,
+					mainPalette,
+					cache,
+					usageCounts,
+				);
 				sampled += 1;
 			} catch (_) {
 				/* skip undecodeable sample frame */
@@ -932,7 +998,7 @@ async function selectTemporaryPaletteFromAnimation(source, width, height) {
 		index += 1;
 		if (sampled > 0 && sampled % 4 === 0) await yieldOutputFrame();
 	}
-	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
 paletteValues = Array.from(colorpad.querySelectorAll(".color-pair")).map(

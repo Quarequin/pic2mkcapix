@@ -1,4 +1,4 @@
-/** Auto-concatenated from script/* — do not edit; edit modules instead. */
+// Auto-concatenated from script — do not edit; edit modules instead. 
 
 /* ==== script/init/htm.js ==== */
 document.querySelector("body div#preload").remove();
@@ -1022,16 +1022,42 @@ function createIndexMap(length) {
 	return rgbPalette.length <= 256 ? new Uint8Array(length) : new Uint16Array(length);
 }
 
+/**
+ * sRGB (0..255) ↔ linear light. Error diffusion in linear space keeps local
+ * average colour closer to the original 24-bit sample (true-colour fidelity).
+ */
+function srgb8ToLinear(c) {
+	const s = c / 255;
+	return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+function linearToSrgb8(v) {
+	const c = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(0, v), 1 / 2.4) - 0.055;
+	return clamp((c * 255 + 0.5) | 0);
+}
+
+/**
+ * Redmean perceptual distance (Compuphase). Stronger true-colour match than
+ * fixed 2/4/3 weights — used by every dither path (ordered + FS + solid).
+ */
+function colorDistanceSq(red, green, blue, color) {
+	const rmean = (red + color.r) >> 1;
+	const dr = red - color.r;
+	const dg = green - color.g;
+	const db = blue - color.b;
+	return (((512 + rmean) * dr * dr) >> 8) + 4 * dg * dg + (((767 - rmean) * db * db) >> 8);
+}
+
+/** Ordered-dither residual carry: keep more quantisation error in-row so the
+ * spatial average stays nearer the original 24-bit sample (was 0.6). */
+const ORDERED_RESIDUAL = 0.85;
+
 function findNearestColor(red, green, blue, palette) {
 	let bestDistance = Infinity;
 	let bestIndex = 1;
 	for (let index = 1; index < palette.length; index += 1) {
 		const color = palette[index];
 		if ((color.a ?? 255) < 128) continue;
-		const dr = red - color.r;
-		const dg = green - color.g;
-		const db = blue - color.b;
-		const distance = dr * dr + dg * dg + db * db;
+		const distance = colorDistanceSq(red, green, blue, color);
 		if (distance < bestDistance) {
 			bestDistance = distance;
 			bestIndex = index;
@@ -1200,9 +1226,9 @@ async function modeDither(
 
 			if (useMatrix) {
 				const color = palette[selected];
-				residualR = 0.6 * (red - color.r);
-				residualG = 0.6 * (green - color.g);
-				residualB = 0.6 * (blue - color.b);
+				residualR = ORDERED_RESIDUAL * (red - color.r);
+				residualG = ORDERED_RESIDUAL * (green - color.g);
+				residualB = ORDERED_RESIDUAL * (blue - color.b);
 			}
 		}
 
@@ -1241,6 +1267,11 @@ async function modeDither(
 	};
 }
 
+/**
+ * Floyd–Steinberg, serpentine, in linear light.
+ * Diffuse quantisation error in linear space so neighbourhood averages track
+ * the original 24-bit sample; nearest lookup still uses Redmean in sRGB.
+ */
 async function modeFloydSteinberg(
 	sourceData,
 	width,
@@ -1254,7 +1285,26 @@ async function modeFloydSteinberg(
 	hasAlpha,
 ) {
 	const indexMap = createIndexMap(width * height);
-	const working = new Float32Array(sourceData);
+	const pixelCount = width * height;
+	// working holds linear RGB for opaque pixels; alpha channel stays sRGB byte.
+	const working = new Float32Array(pixelCount * 4);
+	for (let i = 0; i < pixelCount; i += 1) {
+		const o = i << 2;
+		working[o] = srgb8ToLinear(sourceData[o]);
+		working[o + 1] = srgb8ToLinear(sourceData[o + 1]);
+		working[o + 2] = srgb8ToLinear(sourceData[o + 2]);
+		working[o + 3] = sourceData[o + 3];
+	}
+	const paletteLinear = palette.map((c) =>
+		c
+			? {
+					r: srgb8ToLinear(c.r),
+					g: srgb8ToLinear(c.g),
+					b: srgb8ToLinear(c.b),
+					a: c.a,
+				}
+			: c,
+	);
 	const colorCache = new Map();
 	const needText = typeof onRow === "function";
 	const uiStride = Math.max(progressStep, Math.ceil(height / 12), 1);
@@ -1262,46 +1312,47 @@ async function modeFloydSteinberg(
 	let hexString = needText ? "" : "img`\n";
 	let pendingRow = null;
 
+	const diffuse = (wx, wy, errR, errG, errB, w) => {
+		if (wx < 0 || wx >= width || wy < 0 || wy >= height) return;
+		const o = (wy * width + wx) << 2;
+		if (working[o + 3] < 128) return;
+		working[o] += w * errR;
+		working[o + 1] += w * errG;
+		working[o + 2] += w * errB;
+	};
+
 	for (let y = 0; y < height; y += 1) {
 		const rowStart = y * width;
-		for (let x = 0; x < width; x += 1) {
+		const leftToRight = (y & 1) === 0;
+		const xStart = leftToRight ? 0 : width - 1;
+		const xEnd = leftToRight ? width : -1;
+		const xStep = leftToRight ? 1 : -1;
+
+		for (let x = xStart; x !== xEnd; x += xStep) {
 			const pixelIndex = rowStart + x;
 			const byteOffset = pixelIndex << 2;
 			if (working[byteOffset + 3] < 128) continue;
 
-			const red = clamp(working[byteOffset]);
-			const green = clamp(working[byteOffset + 1]);
-			const blue = clamp(working[byteOffset + 2]);
+			const linR = working[byteOffset];
+			const linG = working[byteOffset + 1];
+			const linB = working[byteOffset + 2];
+			const red = linearToSrgb8(linR);
+			const green = linearToSrgb8(linG);
+			const blue = linearToSrgb8(linB);
 			const selected = cachedFindNearest(red, green, blue, palette, colorCache);
 			indexMap[pixelIndex] = selected;
 
-			const color = palette[selected];
-			const errR = red - color.r;
-			const errG = green - color.g;
-			const errB = blue - color.b;
+			const pl = paletteLinear[selected];
+			const errR = linR - pl.r;
+			const errG = linG - pl.g;
+			const errB = linB - pl.b;
 
-			if (x + 1 < width) {
-				working[byteOffset + 4] += 0.4375 * errR;
-				working[byteOffset + 5] += 0.4375 * errG;
-				working[byteOffset + 6] += 0.4375 * errB;
-			}
-			if (y + 1 < height) {
-				if (x > 0) {
-					const belowLeft = ((y + 1) * width + x - 1) << 2;
-					working[belowLeft] += 0.1875 * errR;
-					working[belowLeft + 1] += 0.1875 * errG;
-					working[belowLeft + 2] += 0.1875 * errB;
-				}
-				const below = ((y + 1) * width + x) << 2;
-				working[below] += 0.3125 * errR;
-				working[below + 1] += 0.3125 * errG;
-				working[below + 2] += 0.3125 * errB;
-				if (x + 1 < width) {
-					working[below + 4] += 0.0625 * errR;
-					working[below + 5] += 0.0625 * errG;
-					working[below + 6] += 0.0625 * errB;
-				}
-			}
+			// Classic FS weights in linear space: 7/16, 3/16, 5/16, 1/16
+			const ahead = leftToRight ? 1 : -1;
+			diffuse(x + ahead, y, errR, errG, errB, 0.4375);
+			diffuse(x - ahead, y + 1, errR, errG, errB, 0.1875);
+			diffuse(x, y + 1, errR, errG, errB, 0.3125);
+			diffuse(x + ahead, y + 1, errR, errG, errB, 0.0625);
 		}
 
 		const line = buildRowString(
@@ -1340,16 +1391,17 @@ async function modeFloydSteinberg(
 
 const DITHER_MODES = {
 	// Aligned with WebGL u_spread: threshold = (matrix / levels - 0.5) * amplitude
-	// Bayer levels = n² (16/64/256). Residual carry 0.6 matches the GPU quantize pass.
-	bayer4: [BAYER4, 4, 16, 112],
-	bayer8: [BAYER8, 8, 64, 128],
-	bayer16: [BAYER16, 16, 256, 144],
-	blue8: [BLUE8, 8, 255, 112],
-	blue16: [BLUE16, 16, 255, 128],
-	blue32: [BLUE32, 32, 255, 144],
-	blue64: [BLUE64, 64, 255, 152],
-	blue128: [BLUE128, 128, 255, 160],
-	blue256: [BLUE256, 256, 255, 168],
+	// Bayer levels = n² (16/64/256). Residual = ORDERED_RESIDUAL (0.85).
+	// Amplitudes tuned so ordered patterns reconstruct intermediate 24-bit tones.
+	bayer4: [BAYER4, 4, 16, 136],
+	bayer8: [BAYER8, 8, 64, 152],
+	bayer16: [BAYER16, 16, 256, 168],
+	blue8: [BLUE8, 8, 255, 136],
+	blue16: [BLUE16, 16, 255, 152],
+	blue32: [BLUE32, 32, 255, 168],
+	blue64: [BLUE64, 64, 255, 176],
+	blue128: [BLUE128, 128, 255, 184],
+	blue256: [BLUE256, 256, 255, 192],
 };
 
 async function runTileCore({
@@ -1442,7 +1494,7 @@ function createDitheringBuffer(data) {
 	return new Uint8ClampedArray(data);
 }
 
-const WASM_PIPELINE_BASE64 = "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zQBNAO0AbQDFAEUA5QBlAD8AvwAfAJ8ANwC3ABcAlwA9AL0AHQCdADUAtQAVAJUA/wB/AN8AXwD3AHcA1wBXAP0AfQDdAF0A9QB1ANUAVQCNALoAlQA0AGUAtgCJAGkAqgBxAM4AFADyAJkAygD2AEAA3gBQACAAdQAMAFkAKAAQADAAoQDSALIAPAAYAAAA5gBdAPoAkQBIAOoAvgBtADgABAB5AMYAnQB9ACQA1gBEAAgALACuAIUA/wBVABwA4gBhAO4ATADaAIEAwgClAOMAjQCBAOwAoACGAEcAHgCiAOsAYwDRAGwAwABeAJsATgC+AJkANQBWAOAAsgCUAF0AKgC3AJAAGgBJAAoAKQCLAAMA+ABzAMgADQA/APkAqgB+ANUAOACmAOgAdgDMADsA3ACsAHAAIQCaAPUAWADDAA4AMABoALkABgCWAFAAgwDxAGAAFQC0AEYAiQAWAO0AVAAmAMoAAQBDAN4AegD8AC4ApACAAP8AawA0AL8AjwDaAAsAngBbALAAKADPABEAbgBKAOkALQDGABkAeAA8APcAZQAdAIYAMgDwAKgAUgDFAAUAuwCfAE0A1AAjAK0ACAByAEUA4gCTABMAXgDqAIgAOgC1AA4AXAD6ACwA0wCEADYAwQAMAFYA3wBpADEAqwBtABwA8wB9AEQAnAAEALYAYQAkAP4AlwBAANgAvQAfAO4AUwCnAC8AzgB0APQAEQCSAE8AxwAqAHUA5gACAKEAZAATAIwA3QA5ALkAZgBIANcACgB/AP0AWQCyAEsA0AArAPsAbwAGAKMAIgC8AIEAPQDvABgApQA3AMQAkQAbAHwAXwDmAJgAUQD2AA8AcQAwAK8AzAAlAI4ACQDbAEIAwgASAEwAhwAXAGoA5wAzALcABwB5APcAZwDWAD4AqQAAAJUA0gBXAMkAJwCoAGIAIQCeABQA5ACNALgAmgC1ACoAFABPACIAbQASAF8AhwC+AFQAygCAAL4ARAAiAAEAFwBUAO0ARgDhAJAA7QClADEAZgDtAG0AugBGAAkAdADcAPgAowD9AJMA1AA3APUADgCnACYAOQALAOkAmADFAIsArgA2AHoADgBcAD8ADQDFALQAGgCOADsA2QCDAMwAWAA0AIkAZQAcAMIA5gB3ALAA9ABgANYAnAAuAG8AUQDbACAA8QCgAM4AhADjAHgA+wBZAMIABQBnAKgAJACtAA8A5QBAALkA7wBJAAQAMgAVAH4AIwBOAL8AigAcAJUAQABxABEASAAmALEAMACbACEAQwDaAKEATgAVAPMAaQDHADoA3gAMAJ4AWwCpAMkAjwA7APkAEQBqAN8AtgBfAOwABgCXAGQA0wAKAFMAyQB7APIADACFAOYALwBQACkA+gB8ACcAqwAwAIYA/wBuAFIAvAAoAIEARwDDADUApAAUAH8AvQAsAIgA/gAdAKwANABrALsAXgAZANEA2ACRABsAtwBgAOsATQATAD0A4gCXAAgApgBdAPcAHwBzAEsAxgA6AOgAUQATAHUA3wApAJ4ATAD/ADkAlgByAD4A6ABwAAcA1QA1AI0AywB9ACUAaADFADEAswANAFUA8AAuAIIA8wAPAKkAPgCSAGAAtQAIAMcAIwB+AM0AWACvAAIAwQBCAJwAHgBmAPcAVgCtABUARACdAN0AbADCADwAmQALAFcAuACAAOwAMwCGANwARQCUAPIAEAAsALMAdgDlAC8AiwALAOAAQwC1ACoA+gCRACEAVAAGAO4ASgClAGUA2QArAGMAGACjAE8ACwD8AGoAHwCrAFMAxQB5ADYAoQBkAP8ASgC9AHQABQCfAGEANgDSAH8ALQChAB0A1AA4AIwAvwBGANAALQC+AJMAPAC3AOAANwCMAAoA7ADPABcAhABRANYALgCYAOcAEwCIAE0AugD9AHYAywA0ACIAewDiAAUAmwAlAHIA6gAcAF8A1wAoAIEA+QBIAKUAJgC7AA4ArAA8AIEA9QBsAD8AzAAcAFwAkABDAAwAsAD3AFsAMACqAGYA+gBUAAYArQCDADMAxwAWAGgAvAA1AI8ARADkAF0AyQAmABEATgCoAHEA8gA4ALkA5gBZACkAngAWAIcAOwDaAI0AwQB6ADkA9gBuAFAAmgAlAOcAYgD7AHoAMQDDAAgApgDcACwAiQACAEsAlQAXAGkA/gCTAE4AzAAhAHQAPwC0AB0AnwBkABUApADrADAA1QB1AAcAEACxAGoAIgCdAFUANgDAAHUA6gArAKIAxgA9AIAAEwC7ADEA4QBeANUALgB+AM0ASQCRAB4AcAC/AD4AiADbALYAQQDwAA0AbwDLABoAWwAOALMAZQAmAFEArAA4AN0ADgCoAE0AlwAjAGwA9AARAJwAWADPACoAfQD+ABQAYAAsANEAfAAyAK0ABwCUAD8A9gB4ADUA0QAcAI8AXwAiAMAAcwA6AOYADAC5AEcAigAyAPEAqQAcALUASgCfAC4A6QAcAJ4AVgDFACQA4QCDAEgAEwCgAPcAbgBAALsA/ABqACwAxwBSAKcANgDbAGEACgDEAHkAQADpAAgAjwBvAGYANwDsABMAjQD6AF4AKwC8AFMA5gAPAEwAmwAqAIAASQChABsAcQDtAIEAIACwAFUA2gAvAJkAZgDCADkA+ACnAE4A2QA8ACAAcwCxADkAzACGADAAqwDeAAkAxgA9ANYAiABdALUAFAA/AJYA8gAmAH8A/wBGAIkAHQDiAFQADQDCAG4AkwDlAEQAFQClAGQAJgB0AMMANACMABgAUwAvAKwAJgD4AGkAyABZABkArgA6ANMAXwATAKYAMwB7AJEAKgD/AFwABQC3AG0A7QBPAJsA/QBFAKMA7QB1AC0AnAAdAHcARADWADAAhQA9AN4AkQAjAL0A9QBsAMgASwAjAKwATwAVAKEANgCAAC4A1gAMAFgAkgAfAGYAvQD+AGEAuAA0AOMACwCjAE4A7ABnAB4AmABRABEAhAA+AO4AzAB2ADUAxgBxAPQAIQC/AJgAQwC0ACkAzwBKAIgAFQA8AI0A+QAQAF4AgAAsAL8AOADcAIAAwgBaAPcAKwCcAAsA5gCNACUAVgASAJwAYAAZAHsAyQA6AJUA6AA5AKYAzQBPACIAdQCtADcA0gB7AKcADABHALkANgB0AMsAHwBjAEAAvQD2AKkATADSAIsA3gAxAFUArQAoAHMA/QBYAC4AlwDfAD4AiwACAFAAngDlAGEAkgAmANsAsQAJAEQAmAAZAGsADgA6AMEALQDrAKIAagAlAJoA9QASAIMASAC6AGUANgDBABwAcwDtADEAfgDVAEEA+wCFACgAXwC2ANsAUgCvAIAA5wADAHgARwAOAMcAfgA9AGAAswArANIAgQARAKQAWADOAEYAmAAiALUAOQBwAB0AngDgAE0AkAAwAMkAKABbAKUAhgAzALsA+gBcAJAAHABEAJcA6gA5APIAfQBJAMMAKgCBAN8AWwAUAIoA9gBUAL8ANQB5AAAAdAA4ANUAHgCVAFAAzQBuADUAqAAjAHEAygBUABMAoABnADAA1AAkAJoA9wBCAK8AbAAgAKoAPwDrAJMAGgDGAEMAtAAMAPEAaADiAD8AEwCPANoATAC3AC8AhAD7AF8AJgCrADsAjADaAGUALQCFAPEAmwBXAMcALABuALMA+gAAWgRuYW1lAAoJY29tcC53YXNtAScDAAZtZW1zZXQBDmNvbXBfaGVhcF9iYXNlAgxjb21wX3Byb2Nlc3MHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQB/CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVjbGFuZ18xOC4xLjItd2FzaS1zZGsgKGh0dHBzOi8vZ2l0aHViLmNvbS9sbHZtL2xsdm0tcHJvamVjdCAyNmExZDY2MDFkNzI3YTk2ZjQzMDFkMGQ4NjQ3YjVhNDI3NjBhZTBjKQAsD3RhcmdldF9mZWF0dXJlcwIrD211dGFibGUtZ2xvYmFscysIc2lnbi1leHQ=";
+const WASM_PIPELINE_BASE64 = "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LwCvAAcAhwAnAKcADQCNAC0ArQAFAIUAJQClAM8ATwDvAG8AxwBHAOcAZwDNAE0A7QBtAMUARQDlAGUAPwC/AB8AnwA3ALcAFwCXAD0AvQAdAJ0ANQC1ABUAlQD/AH8A3wBfAPcAdwDXAFcA/QB9AN0AXQD1AHUA1QBVAI0AugCVADQAZQC2AIkAaQCqAHEAzgAUAPIAmQDKAPYAQADeAFAAIAB1AAwAWQAoABAAMAChANIAsgA8ABgAAADmAF0A+gCRAEgA6gC+AG0AOAAEAHkAxgCdAH0AJADWAEQACAAsAK4AhQD/AFUAHADiAGEA7gBMANoAgQDCAKUA4wCNAIEA7ACgAIYARwAeAKIA6wBjANEAbADAAF4AmwBOAL4AmQA1AFYA4ACyAJQAXQAqALcAkAAaAEkACgApAIsAAwD4AHMAyAANAD8A+QCqAH4A1QA4AKYA6AB2AMwAOwDcAKwAcAAhAJoA9QBYAMMADgAwAGgAuQAGAJYAUACDAPEAYAAVALQARgCJABYA7QBUACYAygABAEMA3gB6APwALgCkAIAA/wBrADQAvwCPANoACwCeAFsAsAAoAM8AEQBuAEoA6QAtAMYAGQB4ADwA9wBlAB0AhgAyAPAAqABSAMUABQC7AJ8ATQDUACMArQAIAHIARQDiAJMAEwBeAOoAiAA6ALUADgBcAPoALADTAIQANgDBAAwAVgDfAGkAMQCrAG0AHADzAH0ARACcAAQAtgBhACQA/gCXAEAA2AC9AB8A7gBTAKcALwDOAHQA9AARAJIATwDHACoAdQDmAAIAoQBkABMAjADdADkAuQBmAEgA1wAKAH8A/QBZALIASwDQACsA+wBvAAYAowAiALwAgQA9AO8AGAClADcAxACRABsAfABfAOYAmABRAPYADwBxADAArwDMACUAjgAJANsAQgDCABIATACHABcAagDnADMAtwAHAHkA9wBnANYAPgCpAAAAlQDSAFcAyQAnAKgAYgAhAJ4AFADkAI0AuACaALUAKgAUAE8AIgBtABIAXwCHAL4AVADKAIAAvgBEACIAAQAXAFQA7QBGAOEAkADtAKUAMQBmAO0AbQC6AEYACQB0ANwA+ACjAP0AkwDUADcA9QAOAKcAJgA5AAsA6QCYAMUAiwCuADYAegAOAFwAPwANAMUAtAAaAI4AOwDZAIMAzABYADQAiQBlABwAwgDmAHcAsAD0AGAA1gCcAC4AbwBRANsAIADxAKAAzgCEAOMAeAD7AFkAwgAFAGcAqAAkAK0ADwDlAEAAuQDvAEkABAAyABUAfgAjAE4AvwCKABwAlQBAAHEAEQBIACYAsQAwAJsAIQBDANoAoQBOABUA8wBpAMcAOgDeAAwAngBbAKkAyQCPADsA+QARAGoA3wC2AF8A7AAGAJcAZADTAAoAUwDJAHsA8gAMAIUA5gAvAFAAKQD6AHwAJwCrADAAhgD/AG4AUgC8ACgAgQBHAMMANQCkABQAfwC9ACwAiAD+AB0ArAA0AGsAuwBeABkA0QDYAJEAGwC3AGAA6wBNABMAPQDiAJcACACmAF0A9wAfAHMASwDGADoA6ABRABMAdQDfACkAngBMAP8AOQCWAHIAPgDoAHAABwDVADUAjQDLAH0AJQBoAMUAMQCzAA0AVQDwAC4AggDzAA8AqQA+AJIAYAC1AAgAxwAjAH4AzQBYAK8AAgDBAEIAnAAeAGYA9wBWAK0AFQBEAJ0A3QBsAMIAPACZAAsAVwC4AIAA7AAzAIYA3ABFAJQA8gAQACwAswB2AOUALwCLAAsA4ABDALUAKgD6AJEAIQBUAAYA7gBKAKUAZQDZACsAYwAYAKMATwALAPwAagAfAKsAUwDFAHkANgChAGQA/wBKAL0AdAAFAJ8AYQA2ANIAfwAtAKEAHQDUADgAjAC/AEYA0AAtAL4AkwA8ALcA4AA3AIwACgDsAM8AFwCEAFEA1gAuAJgA5wATAIgATQC6AP0AdgDLADQAIgB7AOIABQCbACUAcgDqABwAXwDXACgAgQD5AEgApQAmALsADgCsADwAgQD1AGwAPwDMABwAXACQAEMADACwAPcAWwAwAKoAZgD6AFQABgCtAIMAMwDHABYAaAC8ADUAjwBEAOQAXQDJACYAEQBOAKgAcQDyADgAuQDmAFkAKQCeABYAhwA7ANoAjQDBAHoAOQD2AG4AUACaACUA5wBiAPsAegAxAMMACACmANwALACJAAIASwCVABcAaQD+AJMATgDMACEAdAA/ALQAHQCfAGQAFQCkAOsAMADVAHUABwAQALEAagAiAJ0AVQA2AMAAdQDqACsAogDGAD0AgAATALsAMQDhAF4A1QAuAH4AzQBJAJEAHgBwAL8APgCIANsAtgBBAPAADQBvAMsAGgBbAA4AswBlACYAUQCsADgA3QAOAKgATQCXACMAbAD0ABEAnABYAM8AKgB9AP4AFABgACwA0QB8ADIArQAHAJQAPwD2AHgANQDRABwAjwBfACIAwABzADoA5gAMALkARwCKADIA8QCpABwAtQBKAJ8ALgDpABwAngBWAMUAJADhAIMASAATAKAA9wBuAEAAuwD8AGoALADHAFIApwA2ANsAYQAKAMQAeQBAAOkACACPAG8AZgA3AOwAEwCNAPoAXgArALwAUwDmAA8ATACbACoAgABJAKEAGwBxAO0AgQAgALAAVQDaAC8AmQBmAMIAOQD4AKcATgDZADwAIABzALEAOQDMAIYAMACrAN4ACQDGAD0A1gCIAF0AtQAUAD8AlgDyACYAfwD/AEYAiQAdAOIAVAANAMIAbgCTAOUARAAVAKUAZAAmAHQAwwA0AIwAGABTAC8ArAAmAPgAaQDIAFkAGQCuADoA0wBfABMApgAzAHsAkQAqAP8AXAAFALcAbQDtAE8AmwD9AEUAowDtAHUALQCcAB0AdwBEANYAMACFAD0A3gCRACMAvQD1AGwAyABLACMArABPABUAoQA2AIAALgDWAAwAWACSAB8AZgC9AP4AYQC4ADQA4wALAKMATgDsAGcAHgCYAFEAEQCEAD4A7gDMAHYANQDGAHEA9AAhAL8AmABDALQAKQDPAEoAiAAVADwAjQD5ABAAXgCAACwAvwA4ANwAgADCAFoA9wArAJwACwDmAI0AJQBWABIAnABgABkAewDJADoAlQDoADkApgDNAE8AIgB1AK0ANwDSAHsApwAMAEcAuQA2AHQAywAfAGMAQAC9APYAqQBMANIAiwDeADEAVQCtACgAcwD9AFgALgCXAN8APgCLAAIAUACeAOUAYQCSACYA2wCxAAkARACYABkAawAOADoAwQAtAOsAogBqACUAmgD1ABIAgwBIALoAZQA2AMEAHABzAO0AMQB+ANUAQQD7AIUAKABfALYA2wBSAK8AgADnAAMAeABHAA4AxwB+AD0AYACzACsA0gCBABEApABYAM4ARgCYACIAtQA5AHAAHQCeAOAATQCQADAAyQAoAFsApQCGADMAuwD6AFwAkAAcAEQAlwDqADkA8gB9AEkAwwAqAIEA3wBbABQAigD2AFQAvwA1AHkAAAB0ADgA1QAeAJUAUADNAG4ANQCoACMAcQDKAFQAEwCgAGcAMADUACQAmgD3AEIArwBsACAAqgA/AOsAkwAaAMYAQwC0AAwA8QBoAOIAPwATAI8A2gBMALcALwCEAPsAXwAmAKsAOwCMANoAZQAtAIUA8QCbAFcAxwAsAG4AswD6AABaBG5hbWUACgljb21wLndhc20BJwMABm1lbXNldAEOY29tcF9oZWFwX2Jhc2UCDGNvbXBfcHJvY2VzcwcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhAH8JcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBBWNsYW5nXzE4LjEuMi13YXNpLXNkayAoaHR0cHM6Ly9naXRodWIuY29tL2xsdm0vbGx2bS1wcm9qZWN0IDI2YTFkNjYwMWQ3MjdhOTZmNDMwMWQwZDg2NDdiNWE0Mjc2MGFlMGMpACwPdGFyZ2V0X2ZlYXR1cmVzAisPbXV0YWJsZS1nbG9iYWxzKwhzaWduLWV4dA==";
 let wasmRuntimePromise = null;
 
 function wasmBytesFromBase64(value) {
@@ -1898,15 +1950,15 @@ function createProgram(gl, vertSrc, fragSrc) {
 
 /** Bayer / blue-noise amplitude used as u_spread (matches Script/WASM). */
 const GPU_SPREAD = {
-	bayer4: 112,
-	bayer8: 128,
-	bayer16: 144,
-	blue8: 112,
-	blue16: 128,
-	blue32: 144,
-	blue64: 152,
-	blue128: 160,
-	blue256: 168,
+	bayer4: 136,
+	bayer8: 152,
+	bayer16: 168,
+	blue8: 136,
+	blue16: 152,
+	blue32: 168,
+	blue64: 176,
+	blue128: 184,
+	blue256: 192,
 };
 
 class GLEngine {
@@ -2124,10 +2176,16 @@ class GLEngine {
 				let bestD = Infinity;
 				for (let p = 1; p < palLen; p += 1) {
 					const c = palette[p];
+					if ((c.a ?? 255) < 128) continue;
+					// Redmean (same as CPU colorDistanceSq) — true-colour fidelity
+					const rmean = (r + c.r) >> 1;
 					const dr = r - c.r,
 						dg = g - c.g,
 						db = b - c.b;
-					const d = dr * dr + dg * dg + db * db;
+					const d =
+						(((512 + rmean) * dr * dr) >> 8) +
+						4 * dg * dg +
+						(((767 - rmean) * db * db) >> 8);
 					if (d < bestD) {
 						bestD = d;
 						best = p;
@@ -2138,9 +2196,10 @@ class GLEngine {
 				line += chars[best];
 				const c = palette[best];
 				if (ordered) {
-					resR = 0.6 * (r - c.r);
-					resG = 0.6 * (g - c.g);
-					resB = 0.6 * (b - c.b);
+					// Match CPU ORDERED_RESIDUAL (0.85)
+					resR = 0.85 * (r - c.r);
+					resG = 0.85 * (g - c.g);
+					resB = 0.85 * (b - c.b);
 				}
 				out[o] = c.r;
 				out[o + 1] = c.g;
@@ -5220,52 +5279,98 @@ function temporaryPaletteLimit() {
 		: 65535;
 }
 
-function finalizeTemporaryPalette(mainPalette, usedMainIndices) {
-	const selected = Array.from(usedMainIndices).sort((left, right) => left - right);
+/**
+ * When the active palette already fits the container limit, keep every slot so
+ * animation quantize sees the same colour set as stills (true-colour fidelity).
+ * Only subset when over the format cap (e.g. GIF 256).
+ */
+function useFullPaletteIfFits(mainPalette) {
 	const limit = temporaryPaletteLimit();
-	if (selected.length > limit) selected.length = limit;
-	if (!selected.includes(0)) selected.unshift(0);
+	if (mainPalette.length <= limit) {
+		temporaryPaletteIndices = mainPalette.map((_, index) => index);
+		rgbPalette = mainPalette;
+		return true;
+	}
+	return false;
+}
+
+function finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts) {
+	const limit = temporaryPaletteLimit();
+	let selected = Array.from(usedMainIndices);
+	if (!selected.includes(0)) selected.push(0);
+	if (selected.length > limit && usageCounts) {
+		// Prefer colours that appear most often across sampled frames.
+		selected.sort(
+			(left, right) =>
+				(usageCounts.get(right) || 0) - (usageCounts.get(left) || 0) || left - right,
+		);
+		selected = selected.slice(0, limit);
+		if (!selected.includes(0)) {
+			selected[selected.length - 1] = 0;
+		}
+	} else if (selected.length > limit) {
+		selected.sort((left, right) => left - right);
+		selected.length = limit;
+		if (!selected.includes(0)) selected.unshift(0);
+	} else {
+		selected.sort((left, right) => left - right);
+	}
 	temporaryPaletteIndices = selected;
 	rgbPalette = temporaryPaletteIndices.map((mainIndex) => mainPalette[mainIndex]);
 }
 
 function selectTemporaryPaletteFromPixels(data) {
 	const mainPalette = rgbPalette;
+	if (useFullPaletteIfFits(mainPalette)) return;
 	const usedMainIndices = new Set([0]);
+	const usageCounts = new Map([[0, 1]]);
 	const cache = new Map();
 	for (let offset = 0; offset < data.length; offset += 4) {
-		if (data[offset + 3] >= 128)
-			usedMainIndices.add(
-				cachedFindNearest(
-					data[offset],
-					data[offset + 1],
-					data[offset + 2],
-					mainPalette,
-					cache,
-				),
-			);
+		if (data[offset + 3] < 128) continue;
+		const index = cachedFindNearest(
+			data[offset],
+			data[offset + 1],
+			data[offset + 2],
+			mainPalette,
+			cache,
+		);
+		usedMainIndices.add(index);
+		usageCounts.set(index, (usageCounts.get(index) || 0) + 1);
 	}
-	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
-function accumulatePaletteFromPixels(pixels, usedMainIndices, mainPalette, cache) {
-	const step = Math.max(4, Math.floor(pixels.length / 4 / 4000) * 4);
+/** Dense scan for animation/video — aims at true-colour coverage, not a 4k sparse grid. */
+function accumulatePaletteFromPixels(pixels, usedMainIndices, mainPalette, cache, usageCounts) {
+	const pixelCount = pixels.length >> 2;
+	// Cap work on huge frames but stay much denser than the old ~4000 samples.
+	const maxSamples = 48000;
+	const step =
+		pixelCount > maxSamples
+			? Math.max(1, Math.floor(pixelCount / maxSamples)) * 4
+			: 4;
 	for (let offset = 0; offset < pixels.length; offset += step) {
-		if (pixels[offset + 3] >= 128)
-			usedMainIndices.add(
-				cachedFindNearest(
-					pixels[offset],
-					pixels[offset + 1],
-					pixels[offset + 2],
-					mainPalette,
-					cache,
-				),
-			);
+		if (pixels[offset + 3] < 128) continue;
+		const index = cachedFindNearest(
+			pixels[offset],
+			pixels[offset + 1],
+			pixels[offset + 2],
+			mainPalette,
+			cache,
+		);
+		usedMainIndices.add(index);
+		if (usageCounts) usageCounts.set(index, (usageCounts.get(index) || 0) + 1);
 	}
 }
 
-/** Video palette prep: seek only to sparse timestamps (avoids decoding every frame twice). */
+/**
+ * Video palette prep: denser timeline samples so intermediate hues are not
+ * dropped before quantize (old path used only 32 seeks).
+ */
 async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
+	const mainPalette = rgbPalette;
+	if (useFullPaletteIfFits(mainPalette)) return;
+
 	const objectUrl = URL.createObjectURL(new Blob([buffer], { type: mimeType }));
 	const video = document.createElement("video");
 	video.src = objectUrl;
@@ -5273,7 +5378,7 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 	video.playsInline = true;
 	video.preload = "auto";
 	const usedMainIndices = new Set([0]);
-	const mainPalette = rgbPalette;
+	const usageCounts = new Map([[0, 1]]);
 	const cache = new Map();
 	try {
 		await new Promise((resolve, reject) => {
@@ -5286,13 +5391,22 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 		});
 		const duration =
 			Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-		const samples = duration > 0 ? 32 : 1;
+		// ~2 samples/sec, clamped so short clips still get many frames and long ones stay responsive.
+		const samples =
+			duration > 0 ? Math.min(192, Math.max(48, Math.ceil(duration * 2))) : 1;
 		for (let i = 0; i < samples; i += 1) {
-			const t = duration ? Math.min((i / samples) * duration, Math.max(0, duration - 0.001)) : 0;
+			const t = duration
+				? Math.min((i / samples) * duration, Math.max(0, duration - 0.001))
+				: 0;
 			await MediaVideoDecoder.waitSeek(video, t);
 			const drawn = MediaVideoDecoder.drawFrame(video, width, height);
-			accumulatePaletteFromPixels(drawn.imageData.data, usedMainIndices, mainPalette, cache);
-			// Drop temporary canvas immediately.
+			accumulatePaletteFromPixels(
+				drawn.imageData.data,
+				usedMainIndices,
+				mainPalette,
+				cache,
+				usageCounts,
+			);
 			drawn.image.width = 0;
 			drawn.image.height = 0;
 			if (i % 4 === 0) await yieldOutputFrame();
@@ -5303,11 +5417,14 @@ async function sampleVideoPaletteSparse(buffer, mimeType, width, height) {
 		video.load();
 		URL.revokeObjectURL(objectUrl);
 	}
-	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
 async function selectTemporaryPaletteFromAnimation(source, width, height) {
-	// Video: sparse seeks only — full frame walks here duplicated processAnimation and felt like a hang.
+	const mainPalette = rgbPalette;
+	// Full palette fits the output format → identical quantize set to still images.
+	if (useFullPaletteIfFits(mainPalette)) return;
+
 	if (
 		uploadedFileBuffer &&
 		String(originalMimeType || "").startsWith("video/")
@@ -5324,18 +5441,26 @@ async function selectTemporaryPaletteFromAnimation(source, width, height) {
 	const stream = await source.open();
 	if (!stream) throw new Error("Unable to open animation while preparing its temporary palette.");
 	const usedMainIndices = new Set([0]);
-	const mainPalette = rgbPalette;
+	const usageCounts = new Map([[0, 1]]);
 	const cache = new Map();
 	const total = stream.frameCount || source.frameCount || 0;
-	const targetSamples = 32;
-	const stride = total > targetSamples ? Math.max(1, Math.floor(total / targetSamples)) : 1;
+	// Walk every frame when short; otherwise stride so we still cover the whole timeline.
+	const maxFullWalk = 256;
+	const stride =
+		total > maxFullWalk ? Math.max(1, Math.ceil(total / maxFullWalk)) : 1;
 	let index = 0;
 	let sampled = 0;
 	for await (const frame of stream) {
 		if (index % stride === 0) {
 			try {
 				const buf = frameToImageData(frame, width, height);
-				accumulatePaletteFromPixels(buf.data, usedMainIndices, mainPalette, cache);
+				accumulatePaletteFromPixels(
+					buf.data,
+					usedMainIndices,
+					mainPalette,
+					cache,
+					usageCounts,
+				);
 				sampled += 1;
 			} catch (_) {
 				/* skip undecodeable sample frame */
@@ -5345,7 +5470,7 @@ async function selectTemporaryPaletteFromAnimation(source, width, height) {
 		index += 1;
 		if (sampled > 0 && sampled % 4 === 0) await yieldOutputFrame();
 	}
-	finalizeTemporaryPalette(mainPalette, usedMainIndices);
+	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
 paletteValues = Array.from(colorpad.querySelectorAll(".color-pair")).map(
