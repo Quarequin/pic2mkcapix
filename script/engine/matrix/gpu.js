@@ -104,15 +104,15 @@ function createProgram(gl, vertSrc, fragSrc) {
 
 /** Bayer / blue-noise amplitude used as u_spread (matches Script/WASM). */
 const GPU_SPREAD = {
-	bayer4: 112,
-	bayer8: 128,
-	bayer16: 144,
-	blue8: 112,
-	blue16: 128,
-	blue32: 144,
-	blue64: 152,
-	blue128: 160,
-	blue256: 168,
+	bayer4: 136,
+	bayer8: 152,
+	bayer16: 168,
+	blue8: 136,
+	blue16: 152,
+	blue32: 168,
+	blue64: 176,
+	blue128: 184,
+	blue256: 192,
 };
 
 class GLEngine {
@@ -330,10 +330,16 @@ class GLEngine {
 				let bestD = Infinity;
 				for (let p = 1; p < palLen; p += 1) {
 					const c = palette[p];
+					if ((c.a ?? 255) < 128) continue;
+					// Redmean (same as CPU colorDistanceSq) — true-colour fidelity
+					const rmean = (r + c.r) >> 1;
 					const dr = r - c.r,
 						dg = g - c.g,
 						db = b - c.b;
-					const d = dr * dr + dg * dg + db * db;
+					const d =
+						(((512 + rmean) * dr * dr) >> 8) +
+						4 * dg * dg +
+						(((767 - rmean) * db * db) >> 8);
 					if (d < bestD) {
 						bestD = d;
 						best = p;
@@ -344,9 +350,10 @@ class GLEngine {
 				line += chars[best];
 				const c = palette[best];
 				if (ordered) {
-					resR = 0.6 * (r - c.r);
-					resG = 0.6 * (g - c.g);
-					resB = 0.6 * (b - c.b);
+					// Match CPU ORDERED_RESIDUAL (0.85)
+					resR = 0.85 * (r - c.r);
+					resG = 0.85 * (g - c.g);
+					resB = 0.85 * (b - c.b);
 				}
 				out[o] = c.r;
 				out[o + 1] = c.g;
