@@ -1624,6 +1624,18 @@ async function yieldOutputFrame() {
 	throwIfStopRequested();
 }
 
+/** Cap UI yields so progress callbacks cannot burn >~50ms of frame budget. */
+let _progressYieldAt = 0;
+async function yieldProgressThrottled(minIntervalMs = 80) {
+	const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+	if (now - _progressYieldAt < minIntervalMs) {
+		throwIfStopRequested();
+		return;
+	}
+	_progressYieldAt = now;
+	await yieldOutputFrame();
+}
+
 const processingStatusLines = {
 	phase: "",
 	graphics: "",
@@ -1907,9 +1919,9 @@ async function processAnimation(e, t) {
 							hasAlpha: h,
 							onRow: textOutputEnabled ? g : null,
 							onProgress: async (e) => {
-								((runButton.textContent = `Converting frame ${n}${i}: ${e}%`),
-									(setProcessingStatusLine("graphics", `Processing frame ${n}${i}: ${e}%`)),
-									await yieldOutputFrame());
+								runButton.textContent = `Converting frame ${n}${i}: ${e}%`;
+								setProcessingStatusLine("graphics", `Processing frame ${n}${i}: ${e}%`);
+								await yieldProgressThrottled(80);
 							},
 						})
 					: "webgl" === s
@@ -1953,7 +1965,7 @@ async function processAnimation(e, t) {
 			(runButton.textContent = `Converting frame ${d}${i}...`),
 			(setProcessingStatusLine("graphics", `Processing frame ${d}${i}...`)),
 			releaseFrame(a),
-			await yieldOutputFrame());
+			d % 2 === 0 ? await yieldOutputFrame() : throwIfStopRequested());
 	}
 	} catch (failure) {
 		r.abort?.();
@@ -2070,7 +2082,7 @@ async function runCPUPipelineFallback(e, t, a, n, i, j, o = imageDataHasAlpha(e.
 				runButton.textContent = !!j ? `${j}: ${e}%` : `Converting... ${e}%`;
 				setProcessingStatusLine("graphics", !!i ? `${i}: ${e}%` : `Processing CPU pipeline... ${e}%`);
 			}
-			await new Promise((resolve) => requestAnimationFrame(resolve));
+			await yieldProgressThrottled(80);
 		},
 	});
 }
@@ -2093,7 +2105,7 @@ async function runGpuTiledPipeline(e, t, a, n, i, j, o = imageDataHasAlpha(e.dat
 				"graphics",
 				i ? `${i}: ${progress}%` : `Processing GPU tile buffer... ${progress}%`,
 			);
-			await new Promise((resolve) => requestAnimationFrame(resolve));
+			await yieldProgressThrottled(80);
 		},
 	});
 }
@@ -2343,9 +2355,9 @@ function downloadBlob(e, t) {
 							hasAlpha: c,
 							onRow: textOutputEnabled ? s.onRow : null,
 							onProgress: async (e) => {
-								((runButton.textContent = `Converting... ${e}%`),
-									setProcessingStatusLine("graphics", `Processing GPU pipeline... ${e}%`),
-									await new Promise((e) => requestAnimationFrame(e)));
+								runButton.textContent = `Converting... ${e}%`;
+								setProcessingStatusLine("graphics", `Processing GPU pipeline... ${e}%`);
+								await yieldProgressThrottled(80);
 							},
 						}))
 					: "webgl" === o

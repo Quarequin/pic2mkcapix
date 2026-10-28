@@ -1016,7 +1016,7 @@ const predefinedPalettes = {
 
 /* ==== script/engine/matrix/cpu.js ==== */
 const clamp = (t) => (t < 0 ? 0 : t > 255 ? 255 : t),
-	COLOR_CACHE_LIMIT = 16384;
+	COLOR_CACHE_LIMIT = 262144;
 
 function createIndexMap(length) {
 	return rgbPalette.length <= 256 ? new Uint8Array(length) : new Uint16Array(length);
@@ -1187,10 +1187,10 @@ async function modeDither(
 	const matrixMask = matrixSize - 1;
 	const inverseDivisor = 1 / matrixDivisor;
 	const needText = typeof onRow === "function";
-	// Cap UI work: ~12 progress ticks and yield about every 24–48 rows.
-	const uiStride = Math.max(progressStep, Math.ceil(height / 12), 1);
-	const rowBatch = Math.max(24, Math.ceil(height / 20));
-	let hexString = needText ? "" : "img`\n";
+	// Fast path: few UI ticks (≤4) so progress awaits do not dominate sub-2s frames.
+	const uiStride = Math.max(progressStep, Math.ceil(height / 4), 1);
+	const rowBatch = Math.max(64, Math.ceil(height / 8));
+	let hexString = "";
 	let pendingRow = null;
 
 	for (let y = 0; y < height; y += 1) {
@@ -1232,24 +1232,39 @@ async function modeDither(
 			}
 		}
 
-		const line = buildRowString(
-			y,
-			width,
-			indexMap,
-			outputPixels,
-			palette,
-			charTable,
-			hasAlpha,
-		);
 		if (needText) {
-			// Fire onRow without awaiting every row; await in batches for responsiveness.
+			const line = buildRowString(
+				y,
+				width,
+				indexMap,
+				outputPixels,
+				palette,
+				charTable,
+				hasAlpha,
+			);
 			pendingRow = onRow(y, line, indexMap.subarray(rowStart, rowStart + width));
 			if ((y + 1) % rowBatch === 0) {
 				await pendingRow;
 				pendingRow = null;
 			}
-		} else {
-			hexString += line + "\n";
+		} else if (outputPixels) {
+			// Write palette RGBA into out buffer without building text lines.
+			for (let x = 0; x < width; x += 1) {
+				const pixelIndex = rowStart + x;
+				const byteOffset = pixelIndex << 2;
+				const color = palette[indexMap[pixelIndex]];
+				if (!color || (hasAlpha && (color.a ?? 255) < 128) || (sourceData && sourceData[byteOffset + 3] < 128)) {
+					outputPixels[byteOffset] = 0;
+					outputPixels[byteOffset + 1] = 0;
+					outputPixels[byteOffset + 2] = 0;
+					outputPixels[byteOffset + 3] = 0;
+					continue;
+				}
+				outputPixels[byteOffset] = color.r;
+				outputPixels[byteOffset + 1] = color.g;
+				outputPixels[byteOffset + 2] = color.b;
+				outputPixels[byteOffset + 3] = hasAlpha && color.a !== undefined ? color.a : 255;
+			}
 		}
 		if ((y + 1) % uiStride === 0 || y === height - 1) {
 			if (pendingRow) {
@@ -1262,7 +1277,7 @@ async function modeDither(
 	if (pendingRow) await pendingRow;
 
 	return {
-		hexString: needText ? "" : hexString + "`",
+		hexString: "",
 		indexMap,
 	};
 }
@@ -1307,9 +1322,9 @@ async function modeFloydSteinberg(
 	);
 	const colorCache = new Map();
 	const needText = typeof onRow === "function";
-	const uiStride = Math.max(progressStep, Math.ceil(height / 12), 1);
-	const rowBatch = Math.max(24, Math.ceil(height / 20));
-	let hexString = needText ? "" : "img`\n";
+	const uiStride = Math.max(progressStep, Math.ceil(height / 4), 1);
+	const rowBatch = Math.max(64, Math.ceil(height / 8));
+	let hexString = "";
 	let pendingRow = null;
 
 	const diffuse = (wx, wy, errR, errG, errB, w) => {
@@ -1355,23 +1370,38 @@ async function modeFloydSteinberg(
 			diffuse(x + ahead, y + 1, errR, errG, errB, 0.0625);
 		}
 
-		const line = buildRowString(
-			y,
-			width,
-			indexMap,
-			outputPixels,
-			palette,
-			charTable,
-			hasAlpha,
-		);
 		if (needText) {
+			const line = buildRowString(
+				y,
+				width,
+				indexMap,
+				outputPixels,
+				palette,
+				charTable,
+				hasAlpha,
+			);
 			pendingRow = onRow(y, line, indexMap.subarray(rowStart, rowStart + width));
 			if ((y + 1) % rowBatch === 0) {
 				await pendingRow;
 				pendingRow = null;
 			}
-		} else {
-			hexString += line + "\n";
+		} else if (outputPixels) {
+			for (let x = 0; x < width; x += 1) {
+				const pixelIndex = rowStart + x;
+				const byteOffset = pixelIndex << 2;
+				const color = palette[indexMap[pixelIndex]];
+				if (!color || working[byteOffset + 3] < 128) {
+					outputPixels[byteOffset] = 0;
+					outputPixels[byteOffset + 1] = 0;
+					outputPixels[byteOffset + 2] = 0;
+					outputPixels[byteOffset + 3] = 0;
+					continue;
+				}
+				outputPixels[byteOffset] = color.r;
+				outputPixels[byteOffset + 1] = color.g;
+				outputPixels[byteOffset + 2] = color.b;
+				outputPixels[byteOffset + 3] = hasAlpha && color.a !== undefined ? color.a : 255;
+			}
 		}
 		if ((y + 1) % uiStride === 0 || y === height - 1) {
 			if (pendingRow) {
@@ -1384,7 +1414,7 @@ async function modeFloydSteinberg(
 	if (pendingRow) await pendingRow;
 
 	return {
-		hexString: needText ? "" : hexString + "`",
+		hexString: "",
 		indexMap,
 	};
 }
@@ -1494,7 +1524,7 @@ function createDitheringBuffer(data) {
 	return new Uint8ClampedArray(data);
 }
 
-const WASM_PIPELINE_BASE64 = "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LwCvAAcAhwAnAKcADQCNAC0ArQAFAIUAJQClAM8ATwDvAG8AxwBHAOcAZwDNAE0A7QBtAMUARQDlAGUAPwC/AB8AnwA3ALcAFwCXAD0AvQAdAJ0ANQC1ABUAlQD/AH8A3wBfAPcAdwDXAFcA/QB9AN0AXQD1AHUA1QBVAI0AugCVADQAZQC2AIkAaQCqAHEAzgAUAPIAmQDKAPYAQADeAFAAIAB1AAwAWQAoABAAMAChANIAsgA8ABgAAADmAF0A+gCRAEgA6gC+AG0AOAAEAHkAxgCdAH0AJADWAEQACAAsAK4AhQD/AFUAHADiAGEA7gBMANoAgQDCAKUA4wCNAIEA7ACgAIYARwAeAKIA6wBjANEAbADAAF4AmwBOAL4AmQA1AFYA4ACyAJQAXQAqALcAkAAaAEkACgApAIsAAwD4AHMAyAANAD8A+QCqAH4A1QA4AKYA6AB2AMwAOwDcAKwAcAAhAJoA9QBYAMMADgAwAGgAuQAGAJYAUACDAPEAYAAVALQARgCJABYA7QBUACYAygABAEMA3gB6APwALgCkAIAA/wBrADQAvwCPANoACwCeAFsAsAAoAM8AEQBuAEoA6QAtAMYAGQB4ADwA9wBlAB0AhgAyAPAAqABSAMUABQC7AJ8ATQDUACMArQAIAHIARQDiAJMAEwBeAOoAiAA6ALUADgBcAPoALADTAIQANgDBAAwAVgDfAGkAMQCrAG0AHADzAH0ARACcAAQAtgBhACQA/gCXAEAA2AC9AB8A7gBTAKcALwDOAHQA9AARAJIATwDHACoAdQDmAAIAoQBkABMAjADdADkAuQBmAEgA1wAKAH8A/QBZALIASwDQACsA+wBvAAYAowAiALwAgQA9AO8AGAClADcAxACRABsAfABfAOYAmABRAPYADwBxADAArwDMACUAjgAJANsAQgDCABIATACHABcAagDnADMAtwAHAHkA9wBnANYAPgCpAAAAlQDSAFcAyQAnAKgAYgAhAJ4AFADkAI0AuACaALUAKgAUAE8AIgBtABIAXwCHAL4AVADKAIAAvgBEACIAAQAXAFQA7QBGAOEAkADtAKUAMQBmAO0AbQC6AEYACQB0ANwA+ACjAP0AkwDUADcA9QAOAKcAJgA5AAsA6QCYAMUAiwCuADYAegAOAFwAPwANAMUAtAAaAI4AOwDZAIMAzABYADQAiQBlABwAwgDmAHcAsAD0AGAA1gCcAC4AbwBRANsAIADxAKAAzgCEAOMAeAD7AFkAwgAFAGcAqAAkAK0ADwDlAEAAuQDvAEkABAAyABUAfgAjAE4AvwCKABwAlQBAAHEAEQBIACYAsQAwAJsAIQBDANoAoQBOABUA8wBpAMcAOgDeAAwAngBbAKkAyQCPADsA+QARAGoA3wC2AF8A7AAGAJcAZADTAAoAUwDJAHsA8gAMAIUA5gAvAFAAKQD6AHwAJwCrADAAhgD/AG4AUgC8ACgAgQBHAMMANQCkABQAfwC9ACwAiAD+AB0ArAA0AGsAuwBeABkA0QDYAJEAGwC3AGAA6wBNABMAPQDiAJcACACmAF0A9wAfAHMASwDGADoA6ABRABMAdQDfACkAngBMAP8AOQCWAHIAPgDoAHAABwDVADUAjQDLAH0AJQBoAMUAMQCzAA0AVQDwAC4AggDzAA8AqQA+AJIAYAC1AAgAxwAjAH4AzQBYAK8AAgDBAEIAnAAeAGYA9wBWAK0AFQBEAJ0A3QBsAMIAPACZAAsAVwC4AIAA7AAzAIYA3ABFAJQA8gAQACwAswB2AOUALwCLAAsA4ABDALUAKgD6AJEAIQBUAAYA7gBKAKUAZQDZACsAYwAYAKMATwALAPwAagAfAKsAUwDFAHkANgChAGQA/wBKAL0AdAAFAJ8AYQA2ANIAfwAtAKEAHQDUADgAjAC/AEYA0AAtAL4AkwA8ALcA4AA3AIwACgDsAM8AFwCEAFEA1gAuAJgA5wATAIgATQC6AP0AdgDLADQAIgB7AOIABQCbACUAcgDqABwAXwDXACgAgQD5AEgApQAmALsADgCsADwAgQD1AGwAPwDMABwAXACQAEMADACwAPcAWwAwAKoAZgD6AFQABgCtAIMAMwDHABYAaAC8ADUAjwBEAOQAXQDJACYAEQBOAKgAcQDyADgAuQDmAFkAKQCeABYAhwA7ANoAjQDBAHoAOQD2AG4AUACaACUA5wBiAPsAegAxAMMACACmANwALACJAAIASwCVABcAaQD+AJMATgDMACEAdAA/ALQAHQCfAGQAFQCkAOsAMADVAHUABwAQALEAagAiAJ0AVQA2AMAAdQDqACsAogDGAD0AgAATALsAMQDhAF4A1QAuAH4AzQBJAJEAHgBwAL8APgCIANsAtgBBAPAADQBvAMsAGgBbAA4AswBlACYAUQCsADgA3QAOAKgATQCXACMAbAD0ABEAnABYAM8AKgB9AP4AFABgACwA0QB8ADIArQAHAJQAPwD2AHgANQDRABwAjwBfACIAwABzADoA5gAMALkARwCKADIA8QCpABwAtQBKAJ8ALgDpABwAngBWAMUAJADhAIMASAATAKAA9wBuAEAAuwD8AGoALADHAFIApwA2ANsAYQAKAMQAeQBAAOkACACPAG8AZgA3AOwAEwCNAPoAXgArALwAUwDmAA8ATACbACoAgABJAKEAGwBxAO0AgQAgALAAVQDaAC8AmQBmAMIAOQD4AKcATgDZADwAIABzALEAOQDMAIYAMACrAN4ACQDGAD0A1gCIAF0AtQAUAD8AlgDyACYAfwD/AEYAiQAdAOIAVAANAMIAbgCTAOUARAAVAKUAZAAmAHQAwwA0AIwAGABTAC8ArAAmAPgAaQDIAFkAGQCuADoA0wBfABMApgAzAHsAkQAqAP8AXAAFALcAbQDtAE8AmwD9AEUAowDtAHUALQCcAB0AdwBEANYAMACFAD0A3gCRACMAvQD1AGwAyABLACMArABPABUAoQA2AIAALgDWAAwAWACSAB8AZgC9AP4AYQC4ADQA4wALAKMATgDsAGcAHgCYAFEAEQCEAD4A7gDMAHYANQDGAHEA9AAhAL8AmABDALQAKQDPAEoAiAAVADwAjQD5ABAAXgCAACwAvwA4ANwAgADCAFoA9wArAJwACwDmAI0AJQBWABIAnABgABkAewDJADoAlQDoADkApgDNAE8AIgB1AK0ANwDSAHsApwAMAEcAuQA2AHQAywAfAGMAQAC9APYAqQBMANIAiwDeADEAVQCtACgAcwD9AFgALgCXAN8APgCLAAIAUACeAOUAYQCSACYA2wCxAAkARACYABkAawAOADoAwQAtAOsAogBqACUAmgD1ABIAgwBIALoAZQA2AMEAHABzAO0AMQB+ANUAQQD7AIUAKABfALYA2wBSAK8AgADnAAMAeABHAA4AxwB+AD0AYACzACsA0gCBABEApABYAM4ARgCYACIAtQA5AHAAHQCeAOAATQCQADAAyQAoAFsApQCGADMAuwD6AFwAkAAcAEQAlwDqADkA8gB9AEkAwwAqAIEA3wBbABQAigD2AFQAvwA1AHkAAAB0ADgA1QAeAJUAUADNAG4ANQCoACMAcQDKAFQAEwCgAGcAMADUACQAmgD3AEIArwBsACAAqgA/AOsAkwAaAMYAQwC0AAwA8QBoAOIAPwATAI8A2gBMALcALwCEAPsAXwAmAKsAOwCMANoAZQAtAIUA8QCbAFcAxwAsAG4AswD6AABaBG5hbWUACgljb21wLndhc20BJwMABm1lbXNldAEOY29tcF9oZWFwX2Jhc2UCDGNvbXBfcHJvY2VzcwcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhAH8JcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBBWNsYW5nXzE4LjEuMi13YXNpLXNkayAoaHR0cHM6Ly9naXRodWIuY29tL2xsdm0vbGx2bS1wcm9qZWN0IDI2YTFkNjYwMWQ3MjdhOTZmNDMwMWQwZDg2NDdiNWE0Mjc2MGFlMGMpACwPdGFyZ2V0X2ZlYXR1cmVzAisPbXV0YWJsZS1nbG9iYWxzKwhzaWduLWV4dA==";
+const WASM_PIPELINE_BASE64 = "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IDNqIjQgNCgCACAQQQVswUEQbcFqNgIAICEgM2oiMyAzKAIAIAhBBWzBQRBtwWo2AgAgMg0AIBogMUEMbCIxaiIyIDIoAgAgCcFBEG3BajYCACAiIDFqIgkgCSgCACAQwUEQbcFqNgIAICEgMWoiCSAJKAIAIAjBQRBtwWo2AgALIB4gIGoiHiAfRw0ACwtBACAcIB0bIRhBACEJIBkgBEYNAgwACwtBAiEJCyAJCwuoGgEAQYAIC6AaAAAIAAIACgAMAAQADgAGAAMACwABAAkADwAHAA0ABQAAACAACAAoAAIAIgAKACoAMAAQADgAGAAyABIAOgAaAAwALAAEACQADgAuAAYAJgA8ABwANAAUAD4AHgA2ABYAAwAjAAsAKwABACEACQApADMAEwA7ABsAMQARADkAGQAPAC8ABwAnAA0ALQAFACUAPwAfADcAFwA9AB0ANQAVAAAAgAAgAKAACACIACgAqAACAIIAIgCiAAoAigAqAKoAwABAAOAAYADIAEgA6ABoAMIAQgDiAGIAygBKAOoAagAwALAAEACQADgAuAAYAJgAMgCyABIAkgA6ALoAGgCaAPAAcADQAFAA+AB4ANgAWADyAHIA0gBSAPoAegDaAFoADACMACwArAAEAIQAJACkAA4AjgAuAK4ABgCGACYApgDMAEwA7ABsAMQARADkAGQAzgBOAO4AbgDGAEYA5gBmADwAvAAcAJwANAC0ABQAlAA+AL4AHgCeADYAtgAWAJYA/AB8ANwAXAD0AHQA1ABUAP4AfgDeAF4A9gB2ANYAVgADAIMAIwCjAAsAiwArAKsAAQCBACEAoQAJAIkAKQCpAMMAQwDjAGMAywBLAOsAawDBAEEA4QBhAMkASQDpAGkAMwCzABMAkwA7ALsAGwCbADEAsQARAJEAOQC5ABkAmQDzAHMA0wBTAPsAewDbAFsA8QBxANEAUQD5AHkA2QBZAA8AjwAvAK8ABwCHACcApwANAI0ALQCtAAUAhQAlAKUAzwBPAO8AbwDHAEcA5wBnAM0ATQDtAG0AxQBFAOUAZQA/AL8AHwCfADcAtwAXAJcAPQC9AB0AnQA1ALUAFQCVAP8AfwDfAF8A9wB3ANcAVwD9AH0A3QBdAPUAdQDVAFUAjQC6AJUANABlALYAiQBpAKoAcQDOABQA8gCZAMoA9gBAAN4AUAAgAHUADABZACgAEAAwAKEA0gCyADwAGAAAAOYAXQD6AJEASADqAL4AbQA4AAQAeQDGAJ0AfQAkANYARAAIACwArgCFAP8AVQAcAOIAYQDuAEwA2gCBAMIApQDjAI0AgQDsAKAAhgBHAB4AogDrAGMA0QBsAMAAXgCbAE4AvgCZADUAVgDgALIAlABdACoAtwCQABoASQAKACkAiwADAPgAcwDIAA0APwD5AKoAfgDVADgApgDoAHYAzAA7ANwArABwACEAmgD1AFgAwwAOADAAaAC5AAYAlgBQAIMA8QBgABUAtABGAIkAFgDtAFQAJgDKAAEAQwDeAHoA/AAuAKQAgAD/AGsANAC/AI8A2gALAJ4AWwCwACgAzwARAG4ASgDpAC0AxgAZAHgAPAD3AGUAHQCGADIA8ACoAFIAxQAFALsAnwBNANQAIwCtAAgAcgBFAOIAkwATAF4A6gCIADoAtQAOAFwA+gAsANMAhAA2AMEADABWAN8AaQAxAKsAbQAcAPMAfQBEAJwABAC2AGEAJAD+AJcAQADYAL0AHwDuAFMApwAvAM4AdAD0ABEAkgBPAMcAKgB1AOYAAgChAGQAEwCMAN0AOQC5AGYASADXAAoAfwD9AFkAsgBLANAAKwD7AG8ABgCjACIAvACBAD0A7wAYAKUANwDEAJEAGwB8AF8A5gCYAFEA9gAPAHEAMACvAMwAJQCOAAkA2wBCAMIAEgBMAIcAFwBqAOcAMwC3AAcAeQD3AGcA1gA+AKkAAACVANIAVwDJACcAqABiACEAngAUAOQAjQC4AJoAtQAqABQATwAiAG0AEgBfAIcAvgBUAMoAgAC+AEQAIgABABcAVADtAEYA4QCQAO0ApQAxAGYA7QBtALoARgAJAHQA3AD4AKMA/QCTANQANwD1AA4ApwAmADkACwDpAJgAxQCLAK4ANgB6AA4AXAA/AA0AxQC0ABoAjgA7ANkAgwDMAFgANACJAGUAHADCAOYAdwCwAPQAYADWAJwALgBvAFEA2wAgAPEAoADOAIQA4wB4APsAWQDCAAUAZwCoACQArQAPAOUAQAC5AO8ASQAEADIAFQB+ACMATgC/AIoAHACVAEAAcQARAEgAJgCxADAAmwAhAEMA2gChAE4AFQDzAGkAxwA6AN4ADACeAFsAqQDJAI8AOwD5ABEAagDfALYAXwDsAAYAlwBkANMACgBTAMkAewDyAAwAhQDmAC8AUAApAPoAfAAnAKsAMACGAP8AbgBSALwAKACBAEcAwwA1AKQAFAB/AL0ALACIAP4AHQCsADQAawC7AF4AGQDRANgAkQAbALcAYADrAE0AEwA9AOIAlwAIAKYAXQD3AB8AcwBLAMYAOgDoAFEAEwB1AN8AKQCeAEwA/wA5AJYAcgA+AOgAcAAHANUANQCNAMsAfQAlAGgAxQAxALMADQBVAPAALgCCAPMADwCpAD4AkgBgALUACADHACMAfgDNAFgArwACAMEAQgCcAB4AZgD3AFYArQAVAEQAnQDdAGwAwgA8AJkACwBXALgAgADsADMAhgDcAEUAlADyABAALACzAHYA5QAvAIsACwDgAEMAtQAqAPoAkQAhAFQABgDuAEoApQBlANkAKwBjABgAowBPAAsA/ABqAB8AqwBTAMUAeQA2AKEAZAD/AEoAvQB0AAUAnwBhADYA0gB/AC0AoQAdANQAOACMAL8ARgDQAC0AvgCTADwAtwDgADcAjAAKAOwAzwAXAIQAUQDWAC4AmADnABMAiABNALoA/QB2AMsANAAiAHsA4gAFAJsAJQByAOoAHABfANcAKACBAPkASAClACYAuwAOAKwAPACBAPUAbAA/AMwAHABcAJAAQwAMALAA9wBbADAAqgBmAPoAVAAGAK0AgwAzAMcAFgBoALwANQCPAEQA5ABdAMkAJgARAE4AqABxAPIAOAC5AOYAWQApAJ4AFgCHADsA2gCNAMEAegA5APYAbgBQAJoAJQDnAGIA+wB6ADEAwwAIAKYA3AAsAIkAAgBLAJUAFwBpAP4AkwBOAMwAIQB0AD8AtAAdAJ8AZAAVAKQA6wAwANUAdQAHABAAsQBqACIAnQBVADYAwAB1AOoAKwCiAMYAPQCAABMAuwAxAOEAXgDVAC4AfgDNAEkAkQAeAHAAvwA+AIgA2wC2AEEA8AANAG8AywAaAFsADgCzAGUAJgBRAKwAOADdAA4AqABNAJcAIwBsAPQAEQCcAFgAzwAqAH0A/gAUAGAALADRAHwAMgCtAAcAlAA/APYAeAA1ANEAHACPAF8AIgDAAHMAOgDmAAwAuQBHAIoAMgDxAKkAHAC1AEoAnwAuAOkAHACeAFYAxQAkAOEAgwBIABMAoAD3AG4AQAC7APwAagAsAMcAUgCnADYA2wBhAAoAxAB5AEAA6QAIAI8AbwBmADcA7AATAI0A+gBeACsAvABTAOYADwBMAJsAKgCAAEkAoQAbAHEA7QCBACAAsABVANoALwCZAGYAwgA5APgApwBOANkAPAAgAHMAsQA5AMwAhgAwAKsA3gAJAMYAPQDWAIgAXQC1ABQAPwCWAPIAJgB/AP8ARgCJAB0A4gBUAA0AwgBuAJMA5QBEABUApQBkACYAdADDADQAjAAYAFMALwCsACYA+ABpAMgAWQAZAK4AOgDTAF8AEwCmADMAewCRACoA/wBcAAUAtwBtAO0ATwCbAP0ARQCjAO0AdQAtAJwAHQB3AEQA1gAwAIUAPQDeAJEAIwC9APUAbADIAEsAIwCsAE8AFQChADYAgAAuANYADABYAJIAHwBmAL0A/gBhALgANADjAAsAowBOAOwAZwAeAJgAUQARAIQAPgDuAMwAdgA1AMYAcQD0ACEAvwCYAEMAtAApAM8ASgCIABUAPACNAPkAEABeAIAALAC/ADgA3ACAAMIAWgD3ACsAnAALAOYAjQAlAFYAEgCcAGAAGQB7AMkAOgCVAOgAOQCmAM0ATwAiAHUArQA3ANIAewCnAAwARwC5ADYAdADLAB8AYwBAAL0A9gCpAEwA0gCLAN4AMQBVAK0AKABzAP0AWAAuAJcA3wA+AIsAAgBQAJ4A5QBhAJIAJgDbALEACQBEAJgAGQBrAA4AOgDBAC0A6wCiAGoAJQCaAPUAEgCDAEgAugBlADYAwQAcAHMA7QAxAH4A1QBBAPsAhQAoAF8AtgDbAFIArwCAAOcAAwB4AEcADgDHAH4APQBgALMAKwDSAIEAEQCkAFgAzgBGAJgAIgC1ADkAcAAdAJ4A4ABNAJAAMADJACgAWwClAIYAMwC7APoAXACQABwARACXAOoAOQDyAH0ASQDDACoAgQDfAFsAFACKAPYAVAC/ADUAeQAAAHQAOADVAB4AlQBQAM0AbgA1AKgAIwBxAMoAVAATAKAAZwAwANQAJACaAPcAQgCvAGwAIACqAD8A6wCTABoAxgBDALQADADxAGgA4gA/ABMAjwDaAEwAtwAvAIQA+wBfACYAqwA7AIwA2gBlAC0AhQDxAJsAVwDHACwAbgCzAPoAAFIEbmFtZQAKCWNvbXAud2FzbQEfAgAOY29tcF9oZWFwX2Jhc2UBDGNvbXBfcHJvY2VzcwcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhACYJcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBBWNsYW5nBjIxLjEuOACUAQ90YXJnZXRfZmVhdHVyZXMIKwtidWxrLW1lbW9yeSsPYnVsay1tZW1vcnktb3B0KxZjYWxsLWluZGlyZWN0LW92ZXJsb25nKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrE25vbnRyYXBwaW5nLWZwdG9pbnQrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=";
 let wasmRuntimePromise = null;
 
 function wasmBytesFromBase64(value) {
@@ -1813,31 +1843,40 @@ async function runWasmPipeline(data, width, height, mode, output, onProgress, on
 		setProcessingStatusLine("graphics", "WASM: invalid index map; using Script fallback...");
 		return null;
 	}
-	const progressStep = Math.max(1, Math.ceil(height / 12));
-	const rowBatch = Math.max(24, Math.ceil(height / 20));
+	const progressStep = Math.max(1, Math.ceil(height / 4));
+	const rowBatch = Math.max(64, Math.ceil(height / 8));
 	let pendingRow = null;
-	for (let row = 0; row < height; row += 1) {
-		throwIfStopRequested();
-		const line = buildRowString(row, width, indexMap, output.data, rgbPalette, CHAR_TABLE, hasAlpha);
-		if (onRow) {
+	// When text output is off, skip per-row string build — indices already from WASM.
+	if (!onRow) {
+		for (let row = 0; row < height; row += progressStep) {
+			throwIfStopRequested();
+			const at = Math.min(height, row + progressStep);
+			const progress = ((at / height) * 100).toFixed(2);
+			await onProgress(progress);
+		}
+		await onProgress("100.00");
+	} else {
+		for (let row = 0; row < height; row += 1) {
+			throwIfStopRequested();
+			const line = buildRowString(row, width, indexMap, output.data, rgbPalette, CHAR_TABLE, hasAlpha);
 			pendingRow = onRow(row, line, indexMap.subarray(row * width, (row + 1) * width));
 			if ((row + 1) % rowBatch === 0) {
 				await pendingRow;
 				pendingRow = null;
 			}
-		}
-		if ((row + 1) % progressStep === 0 || row === height - 1) {
-			if (pendingRow) {
-				await pendingRow;
-				pendingRow = null;
+			if ((row + 1) % progressStep === 0 || row === height - 1) {
+				if (pendingRow) {
+					await pendingRow;
+					pendingRow = null;
+				}
+				const progress = (((row + 1) / height) * 100).toFixed(2);
+				await onProgress(progress);
+				setProcessingStatusLine("graphics", `WASM ${frameLabel}: Processing ${progress}%`);
+				runButton.textContent = `WASM ${frameLabel}: ${progress}%`;
 			}
-			const progress = ((row + 1) / height * 100).toFixed(2);
-			await onProgress(progress);
-			setProcessingStatusLine("graphics", `WASM ${frameLabel}: Processing ${progress}%`);
-			runButton.textContent = `WASM ${frameLabel}: ${progress}%`;
 		}
+		if (pendingRow) await pendingRow;
 	}
-	if (pendingRow) await pendingRow;
 	setProcessingStatusLine("graphics", `WASM ${frameLabel}: Finalize 100%`);
 	runButton.textContent = `WASM ${frameLabel}: Finalize 100%`;
 	return { hexString: "", indexMap };
@@ -2150,11 +2189,14 @@ class GLEngine {
 		const chars = CHAR_TABLE;
 		const palLen = palette.length;
 		const ordered = mode.startsWith("bayer") || mode.startsWith("blue");
+		const needText = typeof onRow === "function";
 		const clamp8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
-		let hex = onRow ? "" : "img`\n";
+		const colorCache = new Map();
+		const rowBatch = Math.max(64, Math.ceil(h / 8));
+		let pendingRow = null;
 
 		for (let y = 0; y < h; y += 1) {
-			let line = "";
+			let line = needText ? "" : null;
 			const rowStart = y * w;
 			let resR = 0,
 				resG = 0,
@@ -2164,7 +2206,7 @@ class GLEngine {
 				const o = i << 2;
 				if (out[o + 3] < 128) {
 					indexMap[i] = 0;
-					line += chars[0];
+					if (needText) line += chars[0];
 					out[o] = out[o + 1] = out[o + 2] = out[o + 3] = 0;
 					resR = resG = resB = 0;
 					continue;
@@ -2172,31 +2214,35 @@ class GLEngine {
 				const r = ordered ? clamp8(out[o] + resR) : out[o];
 				const g = ordered ? clamp8(out[o + 1] + resG) : out[o + 1];
 				const b = ordered ? clamp8(out[o + 2] + resB) : out[o + 2];
-				let best = 1;
-				let bestD = Infinity;
-				for (let p = 1; p < palLen; p += 1) {
-					const c = palette[p];
-					if ((c.a ?? 255) < 128) continue;
-					// Redmean (same as CPU colorDistanceSq) — true-colour fidelity
-					const rmean = (r + c.r) >> 1;
-					const dr = r - c.r,
-						dg = g - c.g,
-						db = b - c.b;
-					const d =
-						(((512 + rmean) * dr * dr) >> 8) +
-						4 * dg * dg +
-						(((767 - rmean) * db * db) >> 8);
-					if (d < bestD) {
-						bestD = d;
-						best = p;
-						if (d === 0) break;
+				const key = ((255 & r) << 16) | ((255 & g) << 8) | (255 & b);
+				let best = colorCache.get(key);
+				if (best === undefined) {
+					best = 1;
+					let bestD = Infinity;
+					for (let p = 1; p < palLen; p += 1) {
+						const c = palette[p];
+						if ((c.a ?? 255) < 128) continue;
+						const rmean = (r + c.r) >> 1;
+						const dr = r - c.r,
+							dg = g - c.g,
+							db = b - c.b;
+						const d =
+							(((512 + rmean) * dr * dr) >> 8) +
+							4 * dg * dg +
+							(((767 - rmean) * db * db) >> 8);
+						if (d < bestD) {
+							bestD = d;
+							best = p;
+							if (d === 0) break;
+						}
 					}
+					if (colorCache.size >= 262144) colorCache.clear();
+					colorCache.set(key, best);
 				}
 				indexMap[i] = best;
-				line += chars[best];
+				if (needText) line += chars[best];
 				const c = palette[best];
 				if (ordered) {
-					// Match CPU ORDERED_RESIDUAL (0.85)
 					resR = 0.85 * (r - c.r);
 					resG = 0.85 * (g - c.g);
 					resB = 0.85 * (b - c.b);
@@ -2206,15 +2252,18 @@ class GLEngine {
 				out[o + 2] = c.b;
 				out[o + 3] = hasAlpha && c.a !== undefined ? c.a : 255;
 			}
-			if (onRow) {
-				await onRow(y, line, indexMap.subarray(rowStart, rowStart + w));
-			} else {
-				hex += line + "\n";
+			if (needText) {
+				pendingRow = onRow(y, line, indexMap.subarray(rowStart, rowStart + w));
+				if ((y + 1) % rowBatch === 0) {
+					await pendingRow;
+					pendingRow = null;
+				}
 			}
 		}
+		if (pendingRow) await pendingRow;
 
 		return {
-			hexString: onRow ? "" : hex + "`",
+			hexString: "",
 			indexMap,
 		};
 	}
@@ -6096,6 +6145,18 @@ async function yieldOutputFrame() {
 	throwIfStopRequested();
 }
 
+/** Cap UI yields so progress callbacks cannot burn >~50ms of frame budget. */
+let _progressYieldAt = 0;
+async function yieldProgressThrottled(minIntervalMs = 80) {
+	const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+	if (now - _progressYieldAt < minIntervalMs) {
+		throwIfStopRequested();
+		return;
+	}
+	_progressYieldAt = now;
+	await yieldOutputFrame();
+}
+
 const processingStatusLines = {
 	phase: "",
 	graphics: "",
@@ -6379,9 +6440,9 @@ async function processAnimation(e, t) {
 							hasAlpha: h,
 							onRow: textOutputEnabled ? g : null,
 							onProgress: async (e) => {
-								((runButton.textContent = `Converting frame ${n}${i}: ${e}%`),
-									(setProcessingStatusLine("graphics", `Processing frame ${n}${i}: ${e}%`)),
-									await yieldOutputFrame());
+								runButton.textContent = `Converting frame ${n}${i}: ${e}%`;
+								setProcessingStatusLine("graphics", `Processing frame ${n}${i}: ${e}%`);
+								await yieldProgressThrottled(80);
 							},
 						})
 					: "webgl" === s
@@ -6425,7 +6486,7 @@ async function processAnimation(e, t) {
 			(runButton.textContent = `Converting frame ${d}${i}...`),
 			(setProcessingStatusLine("graphics", `Processing frame ${d}${i}...`)),
 			releaseFrame(a),
-			await yieldOutputFrame());
+			d % 2 === 0 ? await yieldOutputFrame() : throwIfStopRequested());
 	}
 	} catch (failure) {
 		r.abort?.();
@@ -6542,7 +6603,7 @@ async function runCPUPipelineFallback(e, t, a, n, i, j, o = imageDataHasAlpha(e.
 				runButton.textContent = !!j ? `${j}: ${e}%` : `Converting... ${e}%`;
 				setProcessingStatusLine("graphics", !!i ? `${i}: ${e}%` : `Processing CPU pipeline... ${e}%`);
 			}
-			await new Promise((resolve) => requestAnimationFrame(resolve));
+			await yieldProgressThrottled(80);
 		},
 	});
 }
@@ -6565,7 +6626,7 @@ async function runGpuTiledPipeline(e, t, a, n, i, j, o = imageDataHasAlpha(e.dat
 				"graphics",
 				i ? `${i}: ${progress}%` : `Processing GPU tile buffer... ${progress}%`,
 			);
-			await new Promise((resolve) => requestAnimationFrame(resolve));
+			await yieldProgressThrottled(80);
 		},
 	});
 }
@@ -6815,9 +6876,9 @@ function downloadBlob(e, t) {
 							hasAlpha: c,
 							onRow: textOutputEnabled ? s.onRow : null,
 							onProgress: async (e) => {
-								((runButton.textContent = `Converting... ${e}%`),
-									setProcessingStatusLine("graphics", `Processing GPU pipeline... ${e}%`),
-									await new Promise((e) => requestAnimationFrame(e)));
+								runButton.textContent = `Converting... ${e}%`;
+								setProcessingStatusLine("graphics", `Processing GPU pipeline... ${e}%`);
+								await yieldProgressThrottled(80);
 							},
 						}))
 					: "webgl" === o
