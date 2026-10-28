@@ -304,11 +304,14 @@ class GLEngine {
 		const chars = CHAR_TABLE;
 		const palLen = palette.length;
 		const ordered = mode.startsWith("bayer") || mode.startsWith("blue");
+		const needText = typeof onRow === "function";
 		const clamp8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
-		let hex = onRow ? "" : "img`\n";
+		const colorCache = new Map();
+		const rowBatch = Math.max(64, Math.ceil(h / 8));
+		let pendingRow = null;
 
 		for (let y = 0; y < h; y += 1) {
-			let line = "";
+			let line = needText ? "" : null;
 			const rowStart = y * w;
 			let resR = 0,
 				resG = 0,
@@ -318,7 +321,7 @@ class GLEngine {
 				const o = i << 2;
 				if (out[o + 3] < 128) {
 					indexMap[i] = 0;
-					line += chars[0];
+					if (needText) line += chars[0];
 					out[o] = out[o + 1] = out[o + 2] = out[o + 3] = 0;
 					resR = resG = resB = 0;
 					continue;
@@ -326,31 +329,35 @@ class GLEngine {
 				const r = ordered ? clamp8(out[o] + resR) : out[o];
 				const g = ordered ? clamp8(out[o + 1] + resG) : out[o + 1];
 				const b = ordered ? clamp8(out[o + 2] + resB) : out[o + 2];
-				let best = 1;
-				let bestD = Infinity;
-				for (let p = 1; p < palLen; p += 1) {
-					const c = palette[p];
-					if ((c.a ?? 255) < 128) continue;
-					// Redmean (same as CPU colorDistanceSq) — true-colour fidelity
-					const rmean = (r + c.r) >> 1;
-					const dr = r - c.r,
-						dg = g - c.g,
-						db = b - c.b;
-					const d =
-						(((512 + rmean) * dr * dr) >> 8) +
-						4 * dg * dg +
-						(((767 - rmean) * db * db) >> 8);
-					if (d < bestD) {
-						bestD = d;
-						best = p;
-						if (d === 0) break;
+				const key = ((255 & r) << 16) | ((255 & g) << 8) | (255 & b);
+				let best = colorCache.get(key);
+				if (best === undefined) {
+					best = 1;
+					let bestD = Infinity;
+					for (let p = 1; p < palLen; p += 1) {
+						const c = palette[p];
+						if ((c.a ?? 255) < 128) continue;
+						const rmean = (r + c.r) >> 1;
+						const dr = r - c.r,
+							dg = g - c.g,
+							db = b - c.b;
+						const d =
+							(((512 + rmean) * dr * dr) >> 8) +
+							4 * dg * dg +
+							(((767 - rmean) * db * db) >> 8);
+						if (d < bestD) {
+							bestD = d;
+							best = p;
+							if (d === 0) break;
+						}
 					}
+					if (colorCache.size >= 262144) colorCache.clear();
+					colorCache.set(key, best);
 				}
 				indexMap[i] = best;
-				line += chars[best];
+				if (needText) line += chars[best];
 				const c = palette[best];
 				if (ordered) {
-					// Match CPU ORDERED_RESIDUAL (0.85)
 					resR = 0.85 * (r - c.r);
 					resG = 0.85 * (g - c.g);
 					resB = 0.85 * (b - c.b);
@@ -360,15 +367,18 @@ class GLEngine {
 				out[o + 2] = c.b;
 				out[o + 3] = hasAlpha && c.a !== undefined ? c.a : 255;
 			}
-			if (onRow) {
-				await onRow(y, line, indexMap.subarray(rowStart, rowStart + w));
-			} else {
-				hex += line + "\n";
+			if (needText) {
+				pendingRow = onRow(y, line, indexMap.subarray(rowStart, rowStart + w));
+				if ((y + 1) % rowBatch === 0) {
+					await pendingRow;
+					pendingRow = null;
+				}
 			}
 		}
+		if (pendingRow) await pendingRow;
 
 		return {
-			hexString: onRow ? "" : hex + "`",
+			hexString: "",
 			indexMap,
 		};
 	}
