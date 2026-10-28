@@ -161,31 +161,40 @@ async function runWasmPipeline(data, width, height, mode, output, onProgress, on
 		setProcessingStatusLine("graphics", "WASM: invalid index map; using Script fallback...");
 		return null;
 	}
-	const progressStep = Math.max(1, Math.ceil(height / 12));
-	const rowBatch = Math.max(24, Math.ceil(height / 20));
+	const progressStep = Math.max(1, Math.ceil(height / 4));
+	const rowBatch = Math.max(64, Math.ceil(height / 8));
 	let pendingRow = null;
-	for (let row = 0; row < height; row += 1) {
-		throwIfStopRequested();
-		const line = buildRowString(row, width, indexMap, output.data, rgbPalette, CHAR_TABLE, hasAlpha);
-		if (onRow) {
+	// When text output is off, skip per-row string build — indices already from WASM.
+	if (!onRow) {
+		for (let row = 0; row < height; row += progressStep) {
+			throwIfStopRequested();
+			const at = Math.min(height, row + progressStep);
+			const progress = ((at / height) * 100).toFixed(2);
+			await onProgress(progress);
+		}
+		await onProgress("100.00");
+	} else {
+		for (let row = 0; row < height; row += 1) {
+			throwIfStopRequested();
+			const line = buildRowString(row, width, indexMap, output.data, rgbPalette, CHAR_TABLE, hasAlpha);
 			pendingRow = onRow(row, line, indexMap.subarray(row * width, (row + 1) * width));
 			if ((row + 1) % rowBatch === 0) {
 				await pendingRow;
 				pendingRow = null;
 			}
-		}
-		if ((row + 1) % progressStep === 0 || row === height - 1) {
-			if (pendingRow) {
-				await pendingRow;
-				pendingRow = null;
+			if ((row + 1) % progressStep === 0 || row === height - 1) {
+				if (pendingRow) {
+					await pendingRow;
+					pendingRow = null;
+				}
+				const progress = (((row + 1) / height) * 100).toFixed(2);
+				await onProgress(progress);
+				setProcessingStatusLine("graphics", `WASM ${frameLabel}: Processing ${progress}%`);
+				runButton.textContent = `WASM ${frameLabel}: ${progress}%`;
 			}
-			const progress = ((row + 1) / height * 100).toFixed(2);
-			await onProgress(progress);
-			setProcessingStatusLine("graphics", `WASM ${frameLabel}: Processing ${progress}%`);
-			runButton.textContent = `WASM ${frameLabel}: ${progress}%`;
 		}
+		if (pendingRow) await pendingRow;
 	}
-	if (pendingRow) await pendingRow;
 	setProcessingStatusLine("graphics", `WASM ${frameLabel}: Finalize 100%`);
 	runButton.textContent = `WASM ${frameLabel}: Finalize 100%`;
 	return { hexString: "", indexMap };
