@@ -511,9 +511,18 @@ const WASM_PIPELINE_BASE64 = "AGFzbQEAAAABEgJgAAF/YAl/f39/f39/f38BfwMDAgABBQMBAA
 let wasmRuntimePromise = null;
 
 function wasmBytesFromBase64(value) {
-	const binary = atob(value);
-	const bytes = new Uint8Array(binary.length);
-	for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+	const bytes =
+		typeof decodeBase64ToBytes === "function"
+			? decodeBase64ToBytes(value)
+			: (() => {
+					const binary = typeof safeAtob === "function" ? safeAtob(value) : null;
+					if (!binary) throw new Error("Embedded WASM base64 is not valid (archive/proxy mangling?).");
+					const out = new Uint8Array(binary.length);
+					for (let index = 0; index < binary.length; index += 1) out[index] = binary.charCodeAt(index);
+					return out;
+				})();
+	if (!bytes || !bytes.length)
+		throw new Error("Embedded WASM base64 is not valid (archive/proxy mangling?).");
 	return bytes;
 }
 
