@@ -1419,7 +1419,7 @@ function canvasToBlob(e, t = "image/png", a) {
 			try {
 				const i = e.toDataURL(t, a),
 					[o, r] = i.split(","),
-					s = atob(r),
+					s = (typeof safeAtob === "function" ? safeAtob(r) : null) || atob(r),
 					l = new Uint8Array(s.length);
 				for (let e = 0; e < s.length; e += 1) l[e] = s.charCodeAt(e);
 				n(

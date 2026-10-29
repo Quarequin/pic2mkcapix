@@ -40,6 +40,32 @@
 	require.cache = cache;
 	require.resolve = resolve;
 	global.require = require;
+	// Archive-safe base64 (Wayback / proxies may corrupt long strings)
+	global.safeAtob = function safeAtob(value) {
+		if (value == null || value === "") return null;
+		var s = String(value)
+			.replace(/[\s\u00a0\u1680\u2000-\u200d\u2028\u2029\u202f\u205f\u3000\ufeff]/g, "")
+			.replace(/[^A-Za-z0-9+/=]/g, "");
+		if (!s) return null;
+		var pad = s.length % 4;
+		if (pad) s += new Array(5 - pad).join("=");
+		try { return atob(s); } catch (e1) {
+			try {
+				s = s.replace(/=+$/, "");
+				pad = s.length % 4;
+				if (pad) s += new Array(5 - pad).join("=");
+				return atob(s);
+			} catch (e2) { return null; }
+		}
+	};
+	global.decodeBase64ToBytes = function decodeBase64ToBytes(value) {
+		var binary = global.safeAtob(value);
+		if (binary == null) return null;
+		var bytes = new Uint8Array(binary.length);
+		for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+		return bytes;
+	};
+
 
 	var parts = [
 		"script/init/htm.js",

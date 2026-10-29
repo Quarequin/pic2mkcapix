@@ -17,7 +17,7 @@ const parts = [
   "script/engine/media/encoder.js",
   "script/main.js",
 ];
-let out = "// Auto-concatenated from script — do not edit; edit modules instead. \n";
+let out = "// Auto-concatenated from script — do not edit; edit modules instead.\n";
 for (const p of parts) {
   out += `\n/* ==== ${p} ==== */\n`;
   out += readFileSync(join(root, p), "utf8");
