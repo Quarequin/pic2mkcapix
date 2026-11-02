@@ -72,7 +72,7 @@ Build outputs
 How pages load scripts
 ----------------------
   Modular (index.htm):
-    <script src="script/es.js"></script>
+    <script src="script/es3.js"></script>
     (or require.js + entry.js / boot.js for unbundled module loading)
 
   Portable standalone (pack/.../portable/IM2MKCAS.htm , pack/.../portable/IM2MKCAB.htm):
