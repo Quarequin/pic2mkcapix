@@ -196,7 +196,7 @@ async function modeDither(
 			let blue = sourceData[byteOffset + 2];
 
 			if (useMatrix) {
-				// Match WebGL: factor = matrix/levels - 0.5; delta = factor * amplitude
+				// Ordered dither: factor = matrix/levels - 0.5; delta = factor * amplitude
 				const threshold =
 					(matrix[matrixRow + (x & matrixMask)] * inverseDivisor - 0.5) * amplitude;
 				red = clamp(red + residualR + threshold);
@@ -403,7 +403,7 @@ async function modeFloydSteinberg(
 }
 
 const DITHER_MODES = {
-	// Aligned with WebGL u_spread: threshold = (matrix / levels - 0.5) * amplitude
+	// Ordered dither amplitude: threshold = (matrix / levels - 0.5) * amplitude
 	// Bayer levels = n² (16/64/256). Residual = ORDERED_RESIDUAL (0.85).
 	// Amplitudes tuned so ordered patterns reconstruct intermediate 24-bit tones.
 	bayer4: [BAYER4, 4, 16, 136],
@@ -552,7 +552,7 @@ async function ensureWasmRuntime() {
 	if (!wasmRuntimePromise) wasmRuntimePromise = loadWasmRuntime();
 	try {
 		const result = await wasmRuntimePromise;
-		wasmStatus.textContent = "WASM C quantizer ready; JavaScript/GPU fallback remains available.";
+		wasmStatus.textContent = "WASM C quantizer ready; JavaScript fallback remains available.";
 		return result.instance;
 	} catch (error) {
 		wasmRuntimePromise = null;
@@ -582,20 +582,7 @@ async function runConversionPipeline({
 		if (wasmResult) return wasmResult;
 	}
 	if (tileSize >= Math.max(w, h)) {
-		return engine === "webgl"
-			? runGLPipeline({
-					canvas,
-					data,
-					w,
-					h,
-					mode,
-					rgbPalette,
-					outImgData,
-					onProgress,
-					onRow,
-					hasAlpha,
-				})
-			: runTileCore({
+		return runTileCore({
 					data,
 					w,
 					h,
@@ -624,8 +611,7 @@ async function runConversionPipeline({
 			}
 			const ditheringBuffer = createDitheringBuffer(tileData);
 			const tileOutput = { data: new Uint8ClampedArray(tileW * tileH * 4) };
-			const tileProcessor = engine === "webgl" ? runGLPipeline : runTileCore;
-			const tileMap = await tileProcessor({
+			const tileMap = await runTileCore({
 				data: ditheringBuffer,
 				w: tileW,
 				h: tileH,
