@@ -75,7 +75,7 @@ How pages load scripts
     <script src="script/es.js"></script>
     (or require.js + entry.js / boot.js for unbundled module loading)
 
-  Portable standalone (pack/.../portable/PIC2MKCA.htm):
+  Portable standalone (pack/.../portable/IM2MKCAS.htm , pack/.../portable/IM2MKCAB.htm):
     single HTML file with style.css + es.js inlined
     WASM uses embedded WASM_PIPELINE_BASE64 when comp/comp.wasm cannot be fetched
 
