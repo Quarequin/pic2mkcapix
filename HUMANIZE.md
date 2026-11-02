@@ -37,7 +37,7 @@ This package contains a cleaned version of `es.js` from pic2mkcapix.
 
 ## How to use
 
-Open `index.htm` (modular) or `pack/PIC2MKCA/portable/PIC2MKCA.htm` (standalone).
+Open `index.htm` (modular) or `pack/PIC2MKCA/portable/IM2MKCAS.htm` (standalone) `pack/PIC2MKCA/portable/IM2MKCAB.htm` (standalone + babel).
 
 ---
 
