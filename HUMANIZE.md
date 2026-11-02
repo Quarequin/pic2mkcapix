@@ -1,6 +1,13 @@
-# Humanized / Readable rewrite notes
+<h1 id="index">Humanized / Readable rewrite notes</h1>
 
-This package contains a cleaned version of `script.js` from pic2mkcapix.
+- [Readme](README.md)
+- [Update](UPDATE.md)
+- Humanize
+- [Robotice](ROBOTICE.md)
+
+---
+
+This package contains a cleaned version of `es.js` from pic2mkcapix.
 
 ## What was done
 
@@ -10,7 +17,6 @@ This package contains a cleaned version of `script.js` from pic2mkcapix.
    - `//script/init/section.js` … `//end`
    - `//script/engine/matrix/cpu.js` … `//end`
    - `//script/engine/wasm/pipeline.js` (nested) … `//end`
-   - `//script/engine/matrix/gpu.js` … `//end`
    - `//script/engine/media/decoder.js` … `//end`
    - `//script/engine/media/encoder.js` … `//end`
    - `//script/main.js` … `//end`
@@ -32,3 +38,7 @@ This package contains a cleaned version of `script.js` from pic2mkcapix.
 ## How to use
 
 Open `index.htm` (modular) or `pack/PIC2MKCA/portable/PIC2MKCA.htm` (standalone).
+
+---
+
+[Return](#index)
