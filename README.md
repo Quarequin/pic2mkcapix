@@ -7,9 +7,9 @@
 
 visit at [page](https://quarequin.github.io/pic2mkcapix)
 
-download offline at [here](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/PIC2MKCA.htm)
+download portable at [IM2MKCAB.htm](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/IM2MKCAB.htm) or [IM2MKCAS.htm](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/IM2MKCAS.htm)
 
-download source at [here](https://github.com/Quarequin/pic2mkcapix/raw/refs/heads/main/pack/PIC2MKCA.zip)
+download source at [PIC2MKCA.zip](https://github.com/Quarequin/pic2mkcapix/raw/refs/heads/main/pack/PIC2MKCA.zip)
 
 <dl>
     <dt>note for anti-ai user:</dt>
