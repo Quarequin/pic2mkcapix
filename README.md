@@ -1,7 +1,7 @@
 # pix2mkcapix
 ## Convert Picture to Makecode-arcade or Pixel-art
 
-<center><p align="center"><a href="https://arcade.makecode.com/S51805-37097-94553-76715"><img width="70%" alt="[makecode arcade] tested anim picture: rickroll meme" src="pictest0.gif"></a><br><img width="45%" alt="tested anim picture: flag(sweden, austria, poland, germany, japan, italy, russia) as pillow [bayer matrix 2x2]" src="pictest1.jpg"> <img width="45%" alt="tested anim picture: flag(sweden, austria, poland, germany, japan, italy, russia) as pillow [floyd steinberg]" src="pictest2.jpg"></p></center>
+<center><p align="center"><a href="https://arcade.makecode.com/S51805-37097-94553-76715"><img width="70%" alt="tested: rickroll meme" src="pictest0.gif"></a><br><img width="45%" alt="tested: flag(SE,AT,PL,DE,JP,IT,RU) as pillow [bayer matrix 2x2]" src="pictest1.jpg"> <img width="45%" alt="tested: flag(SE,AT,PL,DE,JP,IT,RU) as pillow [floyd steinberg]" src="pictest2.jpg"></p></center>
 
 visit at [page](https://quarequin.github.io/pic2mkcapix)
 
