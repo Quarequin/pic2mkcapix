@@ -22,7 +22,7 @@ Layout
     boot.js             single-entry loader (require + module list; archive-safe)
     concat.mjs          builds concatenated es.js from the module list
     es.js               AUTO: concatenated modern build (do not hand-edit)
-    es3.js              AUTO: Babel ES3-oriented transpile of es.js (do not hand-edit)
+    es3.js              AUTO: Closure-Compiler ES3-oriented transpile of es.js (do not hand-edit)
     readme.txt          this file
 
   (removed) engine/matrix/gpu.js — WebGL path retired; engines are script + wasm only
@@ -57,11 +57,10 @@ Build outputs
   es.js     Modern concatenated source for index.htm and portable embed.
             Edit modules only, then re-run concat.mjs.
 
-  es3.js    Transpiled from es.js (Babel preset-env, IE8 / ES3-oriented
+  es3.js    Transpiled from es.js (Closure-Compiler preset-env, IE8 / ES3-oriented
             property & member literal plugins). Regenerate after concat:
 
-              npx --yes @babel/core ...   (or project-local Babel)
-              "npx @babel/cli es.js --out-file es3.js"
+              npx google-closure-compiler --js=es.js --js_output_file=es3.js --compilation_level=WHITESPACE_ONLY --language_out=ECMASCRIPT3
               input:  script/es.js
               output: script/es3.js
 
