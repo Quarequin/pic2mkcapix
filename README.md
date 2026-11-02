@@ -7,7 +7,7 @@
 
 visit at [page](https://quarequin.github.io/pic2mkcapix)
 
-standalone download [full version](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/IM2MKCAS.htm) or [babel version](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/IM2MKCAB.htm)
+standalone download [full version](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/IM2MKCAS.htm) or [closure-es3 version](https://github.com/Quarequin/pic2mkcapix/releases/latest/download/IM2MKCAC.htm)
 
 [download source](https://github.com/Quarequin/pic2mkcapix/raw/refs/heads/main/pack/PIC2MKCA.zip)
 
