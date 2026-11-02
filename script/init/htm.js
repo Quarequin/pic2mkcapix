@@ -245,7 +245,6 @@ No trace details available.</textarea>
 				<label for="engine-select" class="dropdown-label">Processing Engine:</label
 				><select id="engine-select" class="custom-dropdown">
 					<option value="script" selected>script</option>
-					<option value="webgl">webgl</option>
 					<option value="wasm">wasm</option>
 				</select>
 				<small id="wasm-status">WASM is optional; JavaScript fallback is active.</small>

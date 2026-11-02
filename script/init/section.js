@@ -148,7 +148,7 @@ const CHAR_TABLE = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 	// Full-screen quad: x,y,u,v per vertex (TRIANGLE_STRIP)
 	QUAD_VERTICES = new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]);
 
-/** Scale integer Bayer ranks 0..levels-1 into 0..255 for WebGL LUMINANCE textures. */
+/** Scale integer Bayer ranks 0..levels-1 into 0..255. */
 function matrixToU8(src, levels) {
 	const out = new Uint8Array(src.length);
 	for (let i = 0; i < src.length; i += 1) {
