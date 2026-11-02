@@ -1,4 +1,4 @@
-/* style.css — Optimized with display: block/inline/inline-block/none as primary */
+/* style.css — Optimized with display: block/table/none as primary */
 *, *::before, *::after { box-sizing: border-box; }
 
 @font-face {
@@ -108,7 +108,7 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 
 .loader-content {
 	text-align: center;
-	display: inline-block;
+	display: table-cell;
 }
 
 .loader-progress {
@@ -339,44 +339,87 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 }
 
 .colorboard .colorpad .color-pair {
-	display: block;
-	float: left;
-	width: 19.22%;
-	margin: 2px 0.375%;
+	display: table;
+	border-spacing: 4px 0;
+	width: 100%;
+	margin: 3px 0;
 	background: var(--panel-bg);
-	padding: 6px;
+	padding: 6px 8px;
 	border: 1px solid var(--border-color);
+	box-sizing: border-box;
 }
-
+.colorboard .colorpad .color-pair.is-disabled {
+	border-style: dashed;
+	opacity: 0.85;
+}
+.colorboard .colorpad .color-pair.is-placeholder {
+	/* Off-screen recycled empty rows */
+}
+.colorboard .colorpad .color-core-controls,
+.colorboard .colorpad .color-action-controls {
+	display: table-cell;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+.colorboard .colorpad .color-core-controls {
+	width: 1%;
+}
+.colorboard .colorpad .color-action-controls {
+	text-align: right;
+}
 .colorboard .colorpad .color-pair input[type="color"] {
-	padding: 0px;
-	width: 1.3em;
+	display: table-cell;
+	padding: 0;
+	width: 1.6em;
+	height: 1.6em;
 	margin: 0;
-	margin-right: 5px;
 	border-style: solid;
 	vertical-align: middle;
-	display: inline-block;
 }
-
-.colorboard .colorpad .color-pair label {
-	display: inline-block;
-	margin: 0;
-	width: 50px;
-	font-size: 11px;
+.colorboard .colorpad .color-pair .color-enable-label,
+.colorboard .colorpad .color-pair .color-enable,
+.colorboard .colorpad .color-pair .colortext,
+.colorboard .colorpad .color-pair .color-move-steps,
+.colorboard .colorpad .color-pair .color-move-up,
+.colorboard .colorpad .color-pair .color-move-down,
+.colorboard .colorpad .color-pair .color-remove {
+	display: table-cell;
 	vertical-align: middle;
 }
-
-.colorboard .colorpad .color-pair .colortext {
-	display: inline-block;
+.colorboard .colorpad .color-pair .color-enable-label {
 	margin: 0;
-	margin-top: 3.5px;
-	width: calc(100% - 75px);
+	width: auto;
+	font-size: 11px;
+}
+.colorboard .colorpad .color-pair .color-enable {
+	margin: 0;
+	width: auto;
+}
+.colorboard .colorpad .color-pair .color-index-label {
+	display: none;
+}
+.colorboard .colorpad .color-pair .colortext {
+	margin: 0;
+	width: 7.5em;
+	min-width: 5em;
 	font-size: 11px;
 	padding: 2px;
-	vertical-align: middle;
 	font-family: var(--main-mono-font);
 }
-
+.colorboard .colorpad .color-pair .color-move-steps {
+	margin: 0;
+	width: 3.2em;
+	font-size: 11px;
+	padding: 2px;
+}
+.colorboard .colorpad .color-pair .color-move-up,
+.colorboard .colorpad .color-pair .color-move-down {
+	min-width: 1.8em;
+	padding: 2px 6px;
+}
+.colorboard .colorpad .color-pair .color-remove {
+	padding: 2px 8px;
+}
 option.hidden { display: none; }
 
 label { display: block; margin: 10px 0; }
@@ -412,7 +455,7 @@ div.tab-panel textarea {
 	background-color: var(--status-bg);
 	color: var(--status-text);
 	padding: 5px;
-	display: inline-block;
+	display: table-cell;
 	font-weight: bold;
 	position: sticky;
 	top: 10px;
@@ -517,7 +560,7 @@ div.output video,
 	margin-bottom: 8px;
 	border: 1px solid var(--border-color);
 	font-family: var(--main-mono-font);
-	display: inline-block;
+	display: table-cell;
 }
 
 div.output {
@@ -594,7 +637,7 @@ input[type="file"] {
 }
 
 .popup-error-card {
-	display: inline-block;
+	display: table-cell;
 	text-align: left;
 	background: var(--panel-bg);
 	color: var(--accent-color);
@@ -624,12 +667,12 @@ input[type="file"] {
 .popup-header span {
 	float: left;
 	line-height: 24px;
-	display: inline-block;
+	display: table-cell;
 }
 
 .popup-header .popup-close-btn {
 	float: right;
-	display: inline-block;
+	display: table-cell;
 }
 
 .popup-body {
@@ -702,12 +745,12 @@ input[type="file"] {
 .palette-header-row > span {
 	float: left;
 	line-height: 28px;
-	display: inline-block;
+	display: table-cell;
 }
 
 .palette-action-btns {
 	float: right;
-	display: inline-block;
+	display: table-cell;
 }
 
 .palette-slot-btn {
@@ -800,7 +843,7 @@ input[type="file"] {
 
 #ascii-width-input {
 	width: 80px;
-	display: inline-block;
+	display: table-cell;
 }
 
 /* ==========================================================================
@@ -817,11 +860,11 @@ input[type="file"] {
 }
 
 @media (max-width: 1550px) {
-	.colorboard .colorpad .color-pair { width: 24.28%; margin: 2px 0.36%; }
+	.colorboard .colorpad .color-pair { width: 100%; margin: 3px 0; }
 }
 
 @media (max-width: 1200px) {
-	.colorboard .colorpad .color-pair { width: 32.44%; margin: 2px 0.36%; }
+	.colorboard .colorpad .color-pair { width: 100%; margin: 3px 0; }
 }
 
 @media (max-width: 880px) {
@@ -858,9 +901,9 @@ input[type="file"] {
 		display: block;
 	}
 	.colorboard .colorpad .color-pair {
-		width: 24.48%;
-		margin: 3px 0.26%;
-		display: block;
+		width: 100%;
+		margin: 3px 0;
+		display: table;
 	}
 	.preview-box {
 		float: none;
@@ -871,11 +914,20 @@ input[type="file"] {
 	}
 }
 
+.colorboard .colorpad .color-core-controls,
+.colorboard .colorpad .color-action-controls {
+	display: table-row;
+	width: auto;
+	text-align: left;
+}
+.colorboard .colorpad .color-action-controls {
+	margin-top: 4px;
+}
 @media (max-width: 700px) {
 	.colorboard .colorpad .color-pair {
-		width: 32.44%;
-		margin: 3px 0.4%;
-		display: block;
+		width: 100%;
+		margin: 3px 0;
+		display: table;
 	}
 	.action-buttons button {
 		width: 100%;
@@ -893,9 +945,9 @@ input[type="file"] {
 @media (max-width: 480px) {
 	.half { min-width: 0; }
 	.colorboard .colorpad .color-pair {
-		width: 48.7%;
-		margin: 3px 0.58%;
-		display: block;
+		width: 100%;
+		margin: 3px 0;
+		display: table;
 	}
 	.size-settings-grid label:not(.full-row) { width: 48%; }
 	.size-settings-grid input[type="number"] { width: 48%; }
@@ -907,7 +959,7 @@ input[type="file"] {
 		width: 100%;
 		margin: 6px 0;
 		float: none;
-		display: block;
+		display: table;
 	}
 	.size-settings-grid { clear: both; }
 	.size-settings-grid label:not(.full-row) {
@@ -930,7 +982,7 @@ input[type="file"] {
 }
 
 
-/* Palette capacity and twenty-row pager. Existing palette layout is preserved. */
+/* Palette capacity and 16-row recycled pager (single-row slots). */
 .palette-range-controls {
 	display: block;
 	margin: 0 0 8px 0;
@@ -941,7 +993,7 @@ input[type="file"] {
 .palette-range-controls input,
 .palette-range-controls button,
 .palette-range-controls span {
-	display: inline-block;
+	display: table-cell;
 	margin: 2px 4px 2px 0;
 }
 .palette-range-controls input {
@@ -960,7 +1012,7 @@ input[type="file"] {
 
 /* Custom (2^n)×(2^n) tiled — range slider (avoids number-input page scroll traps) */
 .tile-power-slider-row {
-	display: flex;
+	display: table;
 	align-items: center;
 	gap: 8px;
 	margin: 6px 0 4px;
@@ -997,7 +1049,7 @@ input[type="file"] {
 	background: var(--panel-bg, #1f2335);
 }
 .viewer-controls .viewer-toggle {
-	display: flex;
+	display: table;
 	align-items: center;
 	gap: 8px;
 	margin: 4px 0;
