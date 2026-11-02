@@ -61,6 +61,7 @@ Build outputs
             property & member literal plugins). Regenerate after concat:
 
               npx --yes @babel/core ...   (or project-local Babel)
+              "npx @babel/cli es.js --out-file es3.js"
               input:  script/es.js
               output: script/es3.js
 

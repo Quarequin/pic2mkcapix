@@ -287,7 +287,7 @@ No trace details available.</textarea>
 				<span
 					style="font-weight: bold; color: rgb(255, 240, 157)"
 					id="palette-count-label"
-					>Active Color Registers (1–15):</span
+					>Active Color Registers (1–16):</span
 				>
 				<div class="palette-action-btns">
 					<button
@@ -312,129 +312,10 @@ No trace details available.</textarea>
 				<input type="number" id="palette-limit" class="custom" min="2" max="65535" value="15" />
 				<button type="button" id="palette-prev-btn" class="palette-slot-btn">Previous</button>
 				<button type="button" id="palette-next-btn" class="palette-slot-btn">Next</button>
-				<span id="palette-range-label">Colors 1–10</span>
+				<span id="palette-range-label">Colors 1–16</span>
 			</div>
 			<div class="colorpad" id="colorpad">
-				<div class="color-pair">
-					<label>Color 1</label
-					><input type="color" value="#ffffff" /><input
-						type="text"
-						class="colortext"
-						value="#ffffff"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 2</label
-					><input type="color" value="#ff2121" /><input
-						type="text"
-						class="colortext"
-						value="#ff2121"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 3</label
-					><input type="color" value="#ff93c4" /><input
-						type="text"
-						class="colortext"
-						value="#ff93c4"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 4</label
-					><input type="color" value="#ff8135" /><input
-						type="text"
-						class="colortext"
-						value="#ff8135"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 5</label
-					><input type="color" value="#fff609" /><input
-						type="text"
-						class="colortext"
-						value="#fff609"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 6</label
-					><input type="color" value="#249ca3" /><input
-						type="text"
-						class="colortext"
-						value="#249ca3"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 7</label
-					><input type="color" value="#78dc52" /><input
-						type="text"
-						class="colortext"
-						value="#78dc52"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 8</label
-					><input type="color" value="#003fad" /><input
-						type="text"
-						class="colortext"
-						value="#003fad"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 9</label
-					><input type="color" value="#87f2ff" /><input
-						type="text"
-						class="colortext"
-						value="#87f2ff"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 10</label
-					><input type="color" value="#8e2ec4" /><input
-						type="text"
-						class="colortext"
-						value="#8e2ec4"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 11</label
-					><input type="color" value="#a4839f" /><input
-						type="text"
-						class="colortext"
-						value="#a4839f"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 12</label
-					><input type="color" value="#5c406c" /><input
-						type="text"
-						class="colortext"
-						value="#5c406c"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 13</label
-					><input type="color" value="#e5cdc4" /><input
-						type="text"
-						class="colortext"
-						value="#e5cdc4"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 14</label
-					><input type="color" value="#91463d" /><input
-						type="text"
-						class="colortext"
-						value="#91463d"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 15</label
-					><input type="color" value="#000000" /><input
-						type="text"
-						class="colortext"
-						value="#000000"
-					/>
-				</div>
+				<!-- 16 fixed color rows are created once in script and recycled by page scroll. -->
 			</div>
 		</div>
 	</div>
@@ -4754,7 +4635,7 @@ setButtonState("noImage");
 
 const MIN_PALETTE_SLOTS = 2;
 const MAX_PALETTE_SLOTS = 65535;
-const VISIBLE_PALETTE_SLOTS = 20;
+const VISIBLE_PALETTE_SLOTS = 16;
 const MAKECODE_PALETTE_LIMIT = 15;
 let paletteValues = [];
 let palettePageStart = 0;
@@ -4815,49 +4696,138 @@ function makeCustomPaletteLabel() {
 	predefinedPaletteSelect.value = "custom";
 }
 
-function createPalettePair(index, value = "#888888", placeholder = false) {
+function normalizePaletteEntry(value, enabled = true) {
+	if (value && typeof value === "object") {
+		const raw = value.value != null ? value.value : value.hex;
+		return {
+			value: isValidHexRGB(raw) ? String(raw).toLowerCase() : "#888888",
+			enabled: value.enabled !== false,
+		};
+	}
+	return {
+		value: isValidHexRGB(value) ? String(value).toLowerCase() : "#888888",
+		enabled: enabled !== false,
+	};
+}
+
+function paletteEntryValue(entry) {
+	return entry && typeof entry === "object" ? entry.value : entry;
+}
+
+function isPaletteEntryEnabled(entry) {
+	return !entry || typeof entry !== "object" ? true : entry.enabled !== false;
+}
+
+let paletteSlotEls = [];
+
+function buildPaletteSlotElement() {
 	const pair = document.createElement("div");
 	pair.className = "color-pair";
-	pair.dataset.placeholder = placeholder ? "true" : "false";
-	if (placeholder) {
-		pair.style.position = "absolute";
-		pair.style.left = "-999999px";
-		pair.style.top = "-999999px";
-	}
-	const label = document.createElement("label");
-	const colorInput = document.createElement("input");
-	const textInput = document.createElement("input");
-	if (placeholder) {
-		label.textContent = " ";
-		colorInput.type = "color";
-		colorInput.disabled = true;
-		textInput.type = "text";
-		textInput.className = "colortext";
-		textInput.value = "";
-		textInput.disabled = true;
-	} else {
-		label.textContent = `Color ${index + 1}`;
-		colorInput.type = "color";
-		colorInput.value = hexRgbOnly(value);
-		textInput.type = "text";
-		textInput.className = "colortext";
-		textInput.value = value;
-	}
-	pair.append(label, colorInput, textInput);
-	colorpad.appendChild(pair);
-	if (!placeholder) bindColorPairEvents(pair, index);
+	pair.innerHTML =
+		'<label class="color-enable-label" title="EnableColor: use this color during processing">' +
+		'<input type="checkbox" class="color-enable" checked />' +
+		"</label>" +
+		'<span class="color-index-label">Color 1</span>' +
+		'<input type="color" value="#888888" />' +
+		'<input type="text" class="colortext" value="#888888" />' +
+		'<input type="number" class="color-move-steps" min="1" step="1" value="1" title="Move steps" />' +
+		'<button type="button" class="palette-slot-btn color-move-up" title="Move up">^</button>' +
+		'<button type="button" class="palette-slot-btn color-move-down" title="Move down">v</button>' +
+		'<button type="button" class="palette-slot-btn color-remove" title="Remove this color">Remove</button>';
 	return pair;
 }
 
+function ensurePaletteSlots() {
+	if (paletteSlotEls.length === VISIBLE_PALETTE_SLOTS) return;
+	colorpad.replaceChildren();
+	paletteSlotEls = [];
+	for (let i = 0; i < VISIBLE_PALETTE_SLOTS; i += 1) {
+		const pair = buildPaletteSlotElement();
+		colorpad.appendChild(pair);
+		paletteSlotEls.push(pair);
+	}
+	if (!colorpad.dataset.paletteBound) {
+		colorpad.dataset.paletteBound = "1";
+		bindPalettePadDelegation();
+	}
+}
+
+function setPaletteSlotPlaceholder(pair, on) {
+	pair.dataset.placeholder = on ? "true" : "false";
+	pair.classList.toggle("is-placeholder", on);
+	pair.classList.toggle("is-disabled", false);
+	const enable = pair.querySelector(".color-enable");
+	const colorInput = pair.querySelector('input[type="color"]');
+	const textInput = pair.querySelector(".colortext");
+	const steps = pair.querySelector(".color-move-steps");
+	const up = pair.querySelector(".color-move-up");
+	const down = pair.querySelector(".color-move-down");
+	const remove = pair.querySelector(".color-remove");
+	const label = pair.querySelector(".color-index-label");
+	if (on) {
+		pair.style.position = "absolute";
+		pair.style.left = "-999999px";
+		pair.style.top = "-999999px";
+		label.textContent = " ";
+		enable.checked = false;
+		enable.disabled = true;
+		colorInput.disabled = true;
+		textInput.disabled = true;
+		textInput.value = "";
+		steps.disabled = true;
+		steps.value = "1";
+		up.disabled = true;
+		down.disabled = true;
+		remove.disabled = true;
+	} else {
+		pair.style.position = "";
+		pair.style.left = "";
+		pair.style.top = "";
+		enable.disabled = false;
+		colorInput.disabled = false;
+		textInput.disabled = false;
+		steps.disabled = false;
+		up.disabled = false;
+		down.disabled = false;
+		remove.disabled = paletteValues.length <= MIN_PALETTE_SLOTS;
+	}
+}
+
+function fillPaletteSlot(pair, absoluteIndex, entry) {
+	const enabled = isPaletteEntryEnabled(entry);
+	const value = paletteEntryValue(entry) || "#888888";
+	const enable = pair.querySelector(".color-enable");
+	const colorInput = pair.querySelector('input[type="color"]');
+	const textInput = pair.querySelector(".colortext");
+	const steps = pair.querySelector(".color-move-steps");
+	const label = pair.querySelector(".color-index-label");
+	const remove = pair.querySelector(".color-remove");
+	pair.dataset.index = String(absoluteIndex);
+	label.textContent = `Color ${absoluteIndex + 1}`;
+	enable.checked = enabled;
+	colorInput.value = hexRgbOnly(value);
+	textInput.value = value;
+	if (!steps.value || Number(steps.value) < 1) steps.value = "1";
+	pair.dataset.alpha = String(hexToRgba(value).a);
+	pair.classList.toggle("is-disabled", !enabled);
+	remove.disabled = paletteValues.length <= MIN_PALETTE_SLOTS;
+}
+
 function renderPalettePage() {
+	ensurePaletteSlots();
 	const visibleValues = paletteValues.slice(
 		palettePageStart,
 		palettePageStart + VISIBLE_PALETTE_SLOTS,
 	);
-	colorpad.replaceChildren();
-	visibleValues.forEach((value, offset) => createPalettePair(palettePageStart + offset, value));
-	for (let offset = visibleValues.length; offset < VISIBLE_PALETTE_SLOTS; offset += 1) {
-		createPalettePair(palettePageStart + offset, "#888888", true);
+	for (let offset = 0; offset < VISIBLE_PALETTE_SLOTS; offset += 1) {
+		const pair = paletteSlotEls[offset];
+		if (offset < visibleValues.length) {
+			setPaletteSlotPlaceholder(pair, false);
+			fillPaletteSlot(pair, palettePageStart + offset, visibleValues[offset]);
+		} else {
+			setPaletteSlotPlaceholder(pair, true);
+			pair.dataset.index = "";
+		}
 	}
 	updatePaletteCountLabel();
 }
@@ -4866,7 +4836,7 @@ function setPaletteValues(values) {
 	const capacity = paletteCapacity();
 	paletteValues = values
 		.slice(0, capacity)
-		.map((value) => (isValidHexRGB(value) ? value.toLowerCase() : "#888888"));
+		.map((value) => normalizePaletteEntry(value));
 	palettePageStart = Math.min(palettePageStart, lastPalettePageStart());
 	renderPalettePage();
 }
@@ -4874,47 +4844,130 @@ function setPaletteValues(values) {
 
 function updatePaletteValue(index, value) {
 	if (index < 0 || index >= paletteValues.length) return;
-	paletteValues[index] = value;
+	const prev = normalizePaletteEntry(paletteValues[index]);
+	paletteValues[index] = normalizePaletteEntry(value, prev.enabled);
 	makeCustomPaletteLabel();
 }
 
-function bindColorPairEvents(pair, index) {
-	const colorInput = pair.querySelector('input[type="color"]');
-	const textInput = pair.querySelector(".colortext");
-	const originalValue = paletteValues[index];
-	pair.dataset.alpha = String(hexToRgba(originalValue).a);
-	colorInput.addEventListener("input", function () {
-		textInput.value = this.value;
-		pair.dataset.alpha = "255";
-		updatePaletteValue(index, this.value);
-	});
-	textInput.addEventListener("change", function () {
-		let value = this.value.trim();
-		if (!value.startsWith("#")) value = `#${value}`;
-		if (!isValidHexRGB(value)) {
-			displayErrorPopup(
-				"Invalid Color HEX Input",
-				`The color code "${value}" is invalid.`,
-				"Please use Hexadecimal format such as #FFF, #FFFF, #FFFFFF or #FFFFFFFF only.",
-			);
-			this.value = paletteValues[index];
+function updatePaletteEnabled(index, enabled) {
+	if (index < 0 || index >= paletteValues.length) return;
+	const prev = normalizePaletteEntry(paletteValues[index]);
+	if (!enabled) {
+		const enabledCount = paletteValues.reduce(
+			(count, entry) => count + (isPaletteEntryEnabled(entry) ? 1 : 0),
+			0,
+		);
+		if (enabledCount <= 1) {
+			// Keep at least one enabled color for processing.
+			const pair = paletteSlotEls.find((el) => Number(el.dataset.index) === index);
+			if (pair) pair.querySelector(".color-enable").checked = true;
 			return;
 		}
-		this.value = value;
-		colorInput.value = hexRgbOnly(value);
-		pair.dataset.alpha = String(hexToRgba(value).a);
-		updatePaletteValue(index, value);
-		addToSessionLog("PALETTE", `Color slot ${index + 1} updated to ${value}`);
+	}
+	paletteValues[index] = { value: prev.value, enabled: !!enabled };
+	makeCustomPaletteLabel();
+	const pair = paletteSlotEls.find((el) => Number(el.dataset.index) === index);
+	if (pair) pair.classList.toggle("is-disabled", !enabled);
+}
+
+function movePaletteEntry(index, delta) {
+	if (index < 0 || index >= paletteValues.length) return;
+	const target = Math.max(0, Math.min(paletteValues.length - 1, index + delta));
+	if (target === index) return;
+	const entry = paletteValues[index];
+	paletteValues.splice(index, 1);
+	paletteValues.splice(target, 0, entry);
+	makeCustomPaletteLabel();
+	// Keep the moved colour on-screen when possible.
+	if (target < palettePageStart || target >= palettePageStart + VISIBLE_PALETTE_SLOTS) {
+		palettePageStart = Math.floor(target / VISIBLE_PALETTE_SLOTS) * VISIBLE_PALETTE_SLOTS;
+	}
+	renderPalettePage();
+	addToSessionLog("PALETTE", `Moved color ${index + 1} to slot ${target + 1}.`);
+}
+
+function removePaletteEntryAt(index) {
+	if (index < 0 || index >= paletteValues.length) return;
+	if (paletteValues.length <= MIN_PALETTE_SLOTS) return;
+	paletteValues.splice(index, 1);
+	palettePageStart = Math.min(palettePageStart, lastPalettePageStart());
+	makeCustomPaletteLabel();
+	renderPalettePage();
+	updateMakeCodeAvailability();
+	addToSessionLog("PALETTE", `Removed color slot ${index + 1} (now ${paletteValues.length} slots).`);
+}
+
+function bindPalettePadDelegation() {
+	colorpad.addEventListener("input", function (event) {
+		const pair = event.target.closest(".color-pair");
+		if (!pair || pair.dataset.placeholder === "true") return;
+		const index = Number(pair.dataset.index);
+		if (!Number.isFinite(index)) return;
+		if (event.target.classList.contains("color-enable")) {
+			updatePaletteEnabled(index, event.target.checked);
+			return;
+		}
+		if (event.target.type === "color") {
+			const textInput = pair.querySelector(".colortext");
+			textInput.value = event.target.value;
+			pair.dataset.alpha = "255";
+			updatePaletteValue(index, event.target.value);
+		}
+	});
+	colorpad.addEventListener("change", function (event) {
+		const pair = event.target.closest(".color-pair");
+		if (!pair || pair.dataset.placeholder === "true") return;
+		const index = Number(pair.dataset.index);
+		if (!Number.isFinite(index)) return;
+		if (event.target.classList.contains("colortext")) {
+			let value = event.target.value.trim();
+			if (!value.startsWith("#")) value = `#${value}`;
+			if (!isValidHexRGB(value)) {
+				displayErrorPopup(
+					"Invalid Color HEX Input",
+					`The color code "${value}" is invalid.`,
+					"Please use Hexadecimal format such as #FFF, #FFFF, #FFFFFF or #FFFFFFFF only.",
+				);
+				event.target.value = paletteEntryValue(paletteValues[index]);
+				return;
+			}
+			event.target.value = value;
+			pair.querySelector('input[type="color"]').value = hexRgbOnly(value);
+			pair.dataset.alpha = String(hexToRgba(value).a);
+			updatePaletteValue(index, value);
+			addToSessionLog("PALETTE", `Color slot ${index + 1} updated to ${value}`);
+		}
+	});
+	colorpad.addEventListener("click", function (event) {
+		const pair = event.target.closest(".color-pair");
+		if (!pair || pair.dataset.placeholder === "true") return;
+		const index = Number(pair.dataset.index);
+		if (!Number.isFinite(index)) return;
+		const stepsInput = pair.querySelector(".color-move-steps");
+		const steps = Math.max(1, Number.parseInt(stepsInput && stepsInput.value, 10) || 1);
+		if (event.target.classList.contains("color-move-up")) {
+			movePaletteEntry(index, -steps);
+			return;
+		}
+		if (event.target.classList.contains("color-move-down")) {
+			movePaletteEntry(index, steps);
+			return;
+		}
+		if (event.target.classList.contains("color-remove")) {
+			removePaletteEntryAt(index);
+		}
 	});
 }
 
 
 function parseCurrentPalette() {
 	primaryPalette = [{ r: 0, g: 0, b: 0, a: 0 }].concat(
-		paletteValues.map((value) => {
-			const color = hexToRgba(value);
-			return { r: color.r, g: color.g, b: color.b, a: color.a };
-		}),
+		paletteValues
+			.filter((entry) => isPaletteEntryEnabled(entry))
+			.map((entry) => {
+				const color = hexToRgba(paletteEntryValue(entry));
+				return { r: color.r, g: color.g, b: color.b, a: color.a };
+			}),
 	);
 	rgbPalette = primaryPalette.map((color) => ({ ...color }));
 }
@@ -5123,13 +5176,16 @@ async function selectTemporaryPaletteFromAnimation(source, width, height) {
 	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
-paletteValues = Array.from(colorpad.querySelectorAll(".color-pair")).map(
-	(pair) => pair.querySelector(".colortext").value,
-);
+setPaletteValues([
+	"#ffffff", "#ff2121", "#ff93c4", "#ff8135", "#fff609",
+	"#249ca3", "#78dc52", "#003fad", "#87f2ff", "#8e2ec4",
+	"#a4839f", "#5c406c", "#e5cdc4", "#91463d", "#000000"
+]);
+ensurePaletteSlots();
 renderPalettePage();
 paletteAddBtn.addEventListener("click", function () {
 	if (paletteValues.length >= paletteCapacity()) return;
-	paletteValues.push("#888888");
+	paletteValues.push(normalizePaletteEntry("#888888"));
 	palettePageStart = lastPalettePageStart();
 	makeCustomPaletteLabel();
 	renderPalettePage();
