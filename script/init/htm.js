@@ -284,7 +284,7 @@ No trace details available.</textarea>
 				<span
 					style="font-weight: bold; color: rgb(255, 240, 157)"
 					id="palette-count-label"
-					>Active Color Registers (1–15):</span
+					>Active Color Registers (1–16):</span
 				>
 				<div class="palette-action-btns">
 					<button
@@ -309,129 +309,10 @@ No trace details available.</textarea>
 				<input type="number" id="palette-limit" class="custom" min="2" max="65535" value="15" />
 				<button type="button" id="palette-prev-btn" class="palette-slot-btn">Previous</button>
 				<button type="button" id="palette-next-btn" class="palette-slot-btn">Next</button>
-				<span id="palette-range-label">Colors 1–10</span>
+				<span id="palette-range-label">Colors 1–16</span>
 			</div>
 			<div class="colorpad" id="colorpad">
-				<div class="color-pair">
-					<label>Color 1</label
-					><input type="color" value="#ffffff" /><input
-						type="text"
-						class="colortext"
-						value="#ffffff"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 2</label
-					><input type="color" value="#ff2121" /><input
-						type="text"
-						class="colortext"
-						value="#ff2121"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 3</label
-					><input type="color" value="#ff93c4" /><input
-						type="text"
-						class="colortext"
-						value="#ff93c4"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 4</label
-					><input type="color" value="#ff8135" /><input
-						type="text"
-						class="colortext"
-						value="#ff8135"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 5</label
-					><input type="color" value="#fff609" /><input
-						type="text"
-						class="colortext"
-						value="#fff609"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 6</label
-					><input type="color" value="#249ca3" /><input
-						type="text"
-						class="colortext"
-						value="#249ca3"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 7</label
-					><input type="color" value="#78dc52" /><input
-						type="text"
-						class="colortext"
-						value="#78dc52"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 8</label
-					><input type="color" value="#003fad" /><input
-						type="text"
-						class="colortext"
-						value="#003fad"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 9</label
-					><input type="color" value="#87f2ff" /><input
-						type="text"
-						class="colortext"
-						value="#87f2ff"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 10</label
-					><input type="color" value="#8e2ec4" /><input
-						type="text"
-						class="colortext"
-						value="#8e2ec4"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 11</label
-					><input type="color" value="#a4839f" /><input
-						type="text"
-						class="colortext"
-						value="#a4839f"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 12</label
-					><input type="color" value="#5c406c" /><input
-						type="text"
-						class="colortext"
-						value="#5c406c"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 13</label
-					><input type="color" value="#e5cdc4" /><input
-						type="text"
-						class="colortext"
-						value="#e5cdc4"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 14</label
-					><input type="color" value="#91463d" /><input
-						type="text"
-						class="colortext"
-						value="#91463d"
-					/>
-				</div>
-				<div class="color-pair">
-					<label>Color 15</label
-					><input type="color" value="#000000" /><input
-						type="text"
-						class="colortext"
-						value="#000000"
-					/>
-				</div>
+				<!-- 16 fixed color rows are created once in script and recycled by page scroll. -->
 			</div>
 		</div>
 	</div>
