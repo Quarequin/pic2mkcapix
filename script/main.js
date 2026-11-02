@@ -37,22 +37,7 @@ function addToSessionLog(e, t, a) {
 	(htmlLog.push(n), console.log(n));
 }
 
-function detectWebGL() {
-	try {
-		const e = document.createElement("canvas");
-		return !!(
-			e.getContext("webgl2") ||
-			e.getContext("webgl") ||
-			e.getContext("experimental-webgl")
-		);
-	} catch (e) {
-		return !1;
-	}
-}
-
 addToSessionLog("SYSTEM", "Application initialized successfully.");
-
-const webglSupported = detectWebGL();
 
 // These two strings are the authoritative output values. The textareas only
 // contain a viewport projection with newline placeholders outside the view.
@@ -411,15 +396,7 @@ asciiEnableCheck.addEventListener("change", function () {
 });
 
 function updateEngineAvailability() {
-	const errorDiffusion = ditheringSelect.value === "error";
-	const gpuOption = engineSelect.querySelector('option[value="webgl"]');
 	const wasmOption = engineSelect.querySelector('option[value="wasm"]');
-	if (gpuOption) gpuOption.disabled = errorDiffusion || !webglSupported;
-	if (errorDiffusion && engineSelect.value === "webgl") {
-		engineSelect.value = "script";
-		addToSessionLog("ENGINE", "Error Diffusion requires CPU; GPU option disabled.");
-	}
-	if (!webglSupported && engineSelect.value === "webgl") engineSelect.value = "script";
 	if (engineSelect.value === "wasm") {
 		wasmStatus.textContent = "Loading WASM C quantizer...";
 		ensureWasmRuntime().then((instance) => {
@@ -433,15 +410,10 @@ function updateEngineAvailability() {
 }
 
 engineSelect.addEventListener("change", function () {
-	if (this.value === "webgl" && !webglSupported) {
-		this.value = "script";
-		displayErrorPopup("WebGL Not Supported", "Your browser or device does not support WebGL.", "Falling back to CPU mode.");
-	}
 	updateEngineAvailability();
 	addToSessionLog("ENGINE", `Switched to ${this.value.toUpperCase()} processing mode.`);
 });
 ditheringSelect.addEventListener("change", updateEngineAvailability);
-if (!webglSupported) addToSessionLog("SYSTEM", "WebGL not detected. GPU option disabled.");
 updateEngineAvailability();
 
 let processingStatusActive = false;
@@ -1906,36 +1878,7 @@ async function processAnimation(e, t) {
 			h = imageDataHasAlpha(l.data),
 			g = c.onRow;
 		c.setAsciiSource(l.data);
-		const m =
-				"webgl" === s && renderSelect.value === "bitmap"
-					? await runGLPipeline({
-							canvas: canvas,
-							data: l.data,
-							w: e,
-							h: t,
-							mode: ditheringSelect.value,
-							rgbPalette: rgbPalette,
-							outImgData: p,
-							hasAlpha: h,
-							onRow: textOutputEnabled ? g : null,
-							onProgress: async (e) => {
-								runButton.textContent = `Converting frame ${n}${i}: ${e}%`;
-								setProcessingStatusLine("graphics", `Processing frame ${n}${i}: ${e}%`);
-								await yieldProgressThrottled(80);
-							},
-						})
-					: "webgl" === s
-						? await runGpuTiledPipeline(
-								l,
-								e,
-								t,
-								p,
-								`Processing frame ${n}${i}`,
-								`Converting frame ${n}${i}`,
-								h,
-								g,
-							)
-						: await runCPUPipelineFallback(
+		const m = await runCPUPipelineFallback(
 								l,
 								e,
 								t,
@@ -2087,30 +2030,6 @@ async function runCPUPipelineFallback(e, t, a, n, i, j, o = imageDataHasAlpha(e.
 	});
 }
 
-async function runGpuTiledPipeline(e, t, a, n, i, j, o = imageDataHasAlpha(e.data), r) {
-	if (ditheringSelect.value === "error") return runCPUPipelineFallback(e, t, a, n, i, j, o, r);
-	return runConversionPipeline({
-		data: e.data,
-		w: t,
-		h: a,
-		mode: ditheringSelect.value,
-		rgbPalette,
-		outImgData: n,
-		hasAlpha: o,
-		onRow: r,
-		engine: "webgl",
-		onProgress: async (progress) => {
-			runButton.textContent = j ? `${j}: ${progress}%` : `Converting... ${progress}%`;
-			setProcessingStatusLine(
-				"graphics",
-				i ? `${i}: ${progress}%` : `Processing GPU tile buffer... ${progress}%`,
-			);
-			await yieldProgressThrottled(80);
-		},
-	});
-}
-
-
 function imageDataFromIndexMap(indexMap, width, height, palette) {
 	const imageData = new ImageData(width, height);
 	const data = imageData.data;
@@ -2181,7 +2100,7 @@ function frameToImageData(frame, destWidth, destHeight) {
 	return scaleImageData(raw, destWidth, destHeight);
 }
 
-/** Present processed pixels: buffer → process canvas (for WebGL/debug) + output <img>. */
+/** Present processed pixels: buffer → process canvas + output <img>. */
 function presentProcessedImageData(imageData) {
 	if (!imageData) return;
 	if (canvas.width !== imageData.width) canvas.width = imageData.width;
@@ -2343,26 +2262,7 @@ function downloadBlob(e, t) {
 				let l;
 				s.startStatic();
 				const c = imageDataHasAlpha(n.data);
-				("webgl" === o && renderSelect.value === "bitmap"
-					? (l = await runGLPipeline({
-							canvas: canvas,
-							data: n.data,
-							w: t,
-							h: a,
-							mode: ditheringSelect.value,
-							rgbPalette: rgbPalette,
-							outImgData: i,
-							hasAlpha: c,
-							onRow: textOutputEnabled ? s.onRow : null,
-							onProgress: async (e) => {
-								runButton.textContent = `Converting... ${e}%`;
-								setProcessingStatusLine("graphics", `Processing GPU pipeline... ${e}%`);
-								await yieldProgressThrottled(80);
-							},
-						}))
-					: "webgl" === o
-						? (l = await runGpuTiledPipeline(n, t, a, i, null, null, c, textOutputEnabled ? s.onRow : null))
-						: (l = await runCPUPipelineFallback(n, t, a, i, null, null, c, textOutputEnabled ? s.onRow : null)),
+				(l = await runCPUPipelineFallback(n, t, a, i, null, null, c, textOutputEnabled ? s.onRow : null),
 					presentProcessedImageData(
 						imageDataFromIndexMap(l.indexMap, t, a, rgbPalette),
 					),

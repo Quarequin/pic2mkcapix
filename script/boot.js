@@ -73,7 +73,6 @@
 		"script/init/section.js",
 		"script/engine/matrix/cpu.js",
 		"script/engine/wasm/pipeline.js",
-		"script/engine/matrix/gpu.js",
 		"script/engine/media/decoder.js",
 		"script/engine/media/encoder.js",
 		"script/main.js",

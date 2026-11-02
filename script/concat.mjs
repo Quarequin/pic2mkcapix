@@ -1,6 +1,7 @@
 /**
- * Concatenate modular script parts into script/script.js (for portable / file://).
+ * Concatenate modular script parts into script/es.js (for portable / file://).
  * Usage: node script/concat.mjs
+ * Output: script/es.js
  */
 import { readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -12,7 +13,6 @@ const parts = [
   "script/init/section.js",
   "script/engine/matrix/cpu.js",
   "script/engine/wasm/pipeline.js",
-  "script/engine/matrix/gpu.js",
   "script/engine/media/decoder.js",
   "script/engine/media/encoder.js",
   "script/main.js",
@@ -23,5 +23,5 @@ for (const p of parts) {
   out += readFileSync(join(root, p), "utf8");
   if (!out.endsWith("\n")) out += "\n";
 }
-writeFileSync(join(root, "script", "script.js"), out);
-console.log("wrote script.js", out.length, "bytes");
+writeFileSync(join(root, "script", "es.js"), out);
+console.log("wrote es.js", out.length, "bytes");
