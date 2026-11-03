@@ -666,16 +666,22 @@ function makeCustomPaletteLabel() {
 }
 
 function normalizePaletteEntry(value, enabled = true) {
+	const stepsFrom = (v) => {
+		const n = Number.parseInt(v, 10);
+		return Number.isFinite(n) && n >= 1 ? n : 1;
+	};
 	if (value && typeof value === "object") {
 		const raw = value.value != null ? value.value : value.hex;
 		return {
 			value: isValidHexRGB(raw) ? String(raw).toLowerCase() : "#888888",
 			enabled: value.enabled !== false,
+			moveSteps: stepsFrom(value.moveSteps),
 		};
 	}
 	return {
 		value: isValidHexRGB(value) ? String(value).toLowerCase() : "#888888",
 		enabled: enabled !== false,
+		moveSteps: 1,
 	};
 }
 
@@ -696,7 +702,7 @@ function buildPaletteSlotElement() {
 		'<label class="color-enable-label" title="EnableColor: use this color during processing">' +
 		'<input type="checkbox" class="color-enable" checked />' +
 		"</label>" +
-		'<span class="color-index-label">Color 1</span>' +
+		'<span class="color-index-label">1.</span>' +
 		'<input type="color" value="#888888" />' +
 		'<input type="text" class="colortext" value="#888888" />' +
 		'<input type="number" class="color-move-steps" min="1" step="1" value="1" title="Move steps" />' +
@@ -763,8 +769,9 @@ function setPaletteSlotPlaceholder(pair, on) {
 }
 
 function fillPaletteSlot(pair, absoluteIndex, entry) {
-	const enabled = isPaletteEntryEnabled(entry);
-	const value = paletteEntryValue(entry) || "#888888";
+	const normalized = normalizePaletteEntry(entry);
+	const enabled = isPaletteEntryEnabled(normalized);
+	const value = paletteEntryValue(normalized) || "#888888";
 	const enable = pair.querySelector(".color-enable");
 	const colorInput = pair.querySelector('input[type="color"]');
 	const textInput = pair.querySelector(".colortext");
@@ -772,11 +779,18 @@ function fillPaletteSlot(pair, absoluteIndex, entry) {
 	const label = pair.querySelector(".color-index-label");
 	const remove = pair.querySelector(".color-remove");
 	pair.dataset.index = String(absoluteIndex);
-	label.textContent = `Color ${absoluteIndex + 1}`;
+	if (label) {
+		label.textContent = `${absoluteIndex + 1}.`;
+		label.hidden = false;
+		label.removeAttribute("hidden");
+		label.style.display = "inline-block";
+		label.style.visibility = "visible";
+	}
 	enable.checked = enabled;
 	colorInput.value = hexRgbOnly(value);
 	textInput.value = value;
-	if (!steps.value || Number(steps.value) < 1) steps.value = "1";
+	// Always restore from data (DOM recycle must not keep another colour's steps).
+	steps.value = String(normalized.moveSteps || 1);
 	pair.dataset.alpha = String(hexToRgba(value).a);
 	pair.classList.toggle("is-disabled", !enabled);
 	remove.disabled = paletteValues.length <= MIN_PALETTE_SLOTS;
@@ -814,7 +828,12 @@ function setPaletteValues(values) {
 function updatePaletteValue(index, value) {
 	if (index < 0 || index >= paletteValues.length) return;
 	const prev = normalizePaletteEntry(paletteValues[index]);
-	paletteValues[index] = normalizePaletteEntry(value, prev.enabled);
+	const next = normalizePaletteEntry(value, prev.enabled);
+	paletteValues[index] = {
+		value: next.value,
+		enabled: prev.enabled,
+		moveSteps: prev.moveSteps || 1,
+	};
 	makeCustomPaletteLabel();
 }
 
@@ -833,7 +852,11 @@ function updatePaletteEnabled(index, enabled) {
 			return;
 		}
 	}
-	paletteValues[index] = { value: prev.value, enabled: !!enabled };
+	paletteValues[index] = {
+		value: prev.value,
+		enabled: !!enabled,
+		moveSteps: prev.moveSteps || 1,
+	};
 	makeCustomPaletteLabel();
 	const pair = paletteSlotEls.find((el) => Number(el.dataset.index) === index);
 	if (pair) pair.classList.toggle("is-disabled", !enabled);
@@ -843,7 +866,8 @@ function movePaletteEntry(index, delta) {
 	if (index < 0 || index >= paletteValues.length) return;
 	const target = Math.max(0, Math.min(paletteValues.length - 1, index + delta));
 	if (target === index) return;
-	const entry = paletteValues[index];
+	// Keep value + EnableColor + moveSteps together as one record.
+	const entry = normalizePaletteEntry(paletteValues[index]);
 	paletteValues.splice(index, 1);
 	paletteValues.splice(target, 0, entry);
 	makeCustomPaletteLabel();
@@ -852,7 +876,10 @@ function movePaletteEntry(index, delta) {
 		palettePageStart = Math.floor(target / VISIBLE_PALETTE_SLOTS) * VISIBLE_PALETTE_SLOTS;
 	}
 	renderPalettePage();
-	addToSessionLog("PALETTE", `Moved color ${index + 1} to slot ${target + 1}.`);
+	addToSessionLog(
+		"PALETTE",
+		`Moved color ${index + 1} to slot ${target + 1} (enabled=${entry.enabled}, steps=${entry.moveSteps}).`,
+	);
 }
 
 function removePaletteEntryAt(index) {
@@ -874,6 +901,13 @@ function bindPalettePadDelegation() {
 		if (!Number.isFinite(index)) return;
 		if (event.target.classList.contains("color-enable")) {
 			updatePaletteEnabled(index, event.target.checked);
+			return;
+		}
+		if (event.target.classList.contains("color-move-steps")) {
+			const prev = normalizePaletteEntry(paletteValues[index]);
+			const steps = Math.max(1, Number.parseInt(event.target.value, 10) || 1);
+			event.target.value = String(steps);
+			paletteValues[index] = { ...prev, moveSteps: steps };
 			return;
 		}
 		if (event.target.type === "color") {
@@ -914,6 +948,10 @@ function bindPalettePadDelegation() {
 		if (!Number.isFinite(index)) return;
 		const stepsInput = pair.querySelector(".color-move-steps");
 		const steps = Math.max(1, Number.parseInt(stepsInput && stepsInput.value, 10) || 1);
+		if (paletteValues[index]) {
+			const prev = normalizePaletteEntry(paletteValues[index]);
+			paletteValues[index] = { ...prev, moveSteps: steps };
+		}
 		if (event.target.classList.contains("color-move-up")) {
 			movePaletteEntry(index, -steps);
 			return;
@@ -930,15 +968,38 @@ function bindPalettePadDelegation() {
 
 
 function parseCurrentPalette() {
-	primaryPalette = [{ r: 0, g: 0, b: 0, a: 0 }].concat(
-		paletteValues
-			.filter((entry) => isPaletteEntryEnabled(entry))
-			.map((entry) => {
-				const color = hexToRgba(paletteEntryValue(entry));
-				return { r: color.r, g: color.g, b: color.b, a: color.a };
-			}),
+	// Full palette length is preserved so MakeCode / indexMap slots stay stable.
+	// EnableColor=false → a=0 + enabled:false so nearest-colour search skips that
+	// register without collapsing later indices (avoids skewed makecodeString).
+	primaryPalette = [{ r: 0, g: 0, b: 0, a: 0, enabled: false }].concat(
+		paletteValues.map((entry) => {
+			const color = hexToRgba(paletteEntryValue(entry));
+			const enabled = isPaletteEntryEnabled(entry);
+			return {
+				r: color.r,
+				g: color.g,
+				b: color.b,
+				a: enabled ? (color.a ?? 255) : 0,
+				enabled,
+			};
+		}),
 	);
 	rgbPalette = primaryPalette.map((color) => ({ ...color }));
+	// Identity map: quantize indices == primary slot indices (MakeCode digits).
+	temporaryPaletteIndices = primaryPalette.map((_, index) => index);
+}
+
+function lockPrimaryPaletteForProcess() {
+	if (!primaryPalette?.length) parseCurrentPalette();
+	temporaryPaletteIndices = primaryPalette.map((_, index) => index);
+	rgbPalette = primaryPalette.map((color) => ({ ...color }));
+}
+
+function countEnabledPaletteEntries() {
+	return paletteValues.reduce(
+		(count, entry) => count + (isPaletteEntryEnabled(entry) ? 1 : 0),
+		0,
+	);
 }
 
 let temporaryPaletteIndices = null;
@@ -987,8 +1048,11 @@ function finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts) {
 	} else {
 		selected.sort((left, right) => left - right);
 	}
-	temporaryPaletteIndices = selected;
-	rgbPalette = temporaryPaletteIndices.map((mainIndex) => mainPalette[mainIndex]);
+	// Do not collapse rgbPalette for quantize/MakeCode: disabled slots must leave
+	// gaps in index numbers, not renumber. selected is kept for optional export use.
+	temporaryPaletteIndices = mainPalette.map((_, index) => index);
+	rgbPalette = mainPalette.map((color) => ({ ...color }));
+	indexedOutputPalette = selected;
 }
 
 function selectTemporaryPaletteFromPixels(data) {
@@ -1145,13 +1209,18 @@ async function selectTemporaryPaletteFromAnimation(source, width, height) {
 	finalizeTemporaryPalette(mainPalette, usedMainIndices, usageCounts);
 }
 
-setPaletteValues([
-	"#ffffff", "#ff2121", "#ff93c4", "#ff8135", "#fff609",
-	"#249ca3", "#78dc52", "#003fad", "#87f2ff", "#8e2ec4",
-	"#a4839f", "#5c406c", "#e5cdc4", "#91463d", "#000000"
-]);
 ensurePaletteSlots();
-renderPalettePage();
+if (typeof predefinedPalettes !== "undefined" && predefinedPalettes.arcade) {
+	if (predefinedPaletteSelect) predefinedPaletteSelect.value = "arcade";
+	setPaletteValues(predefinedPalettes.arcade);
+} else {
+	setPaletteValues([
+		"#ffffff", "#ff2121", "#ff93c4", "#ff8135", "#fff609",
+		"#249ca3", "#78dc52", "#003fad", "#87f2ff", "#8e2ec4",
+		"#a4839f", "#5c406c", "#e5cdc4", "#91463d", "#000000"
+	]);
+	if (predefinedPaletteSelect) predefinedPaletteSelect.value = "arcade";
+}
 paletteAddBtn.addEventListener("click", function () {
 	if (paletteValues.length >= paletteCapacity()) return;
 	paletteValues.push(normalizePaletteEntry("#888888"));
@@ -1907,10 +1976,14 @@ function makecodeVariableName(date = new Date()) {
 }
 
 function mapMakeCodeRow(sourceRow) {
-	if (!sourceRow || !temporaryPaletteIndices?.length || !primaryPalette.length) return "";
+	if (!sourceRow || !primaryPalette?.length) return "";
 	let line = "";
-	for (const temporaryIndex of sourceRow) {
-		const primaryIndex = temporaryPaletteIndices[temporaryIndex] ?? temporaryIndex;
+	for (const index of sourceRow) {
+		// indexMap stores primary palette slots (0 = transparent).
+		const primaryIndex =
+			temporaryPaletteIndices && temporaryPaletteIndices.length
+				? temporaryPaletteIndices[index] ?? index
+				: index;
 		line += CHAR_TABLE[primaryIndex] ?? CHAR_TABLE[0];
 	}
 	return line;
@@ -2002,6 +2075,7 @@ function createProcessedTextOutput(width, height, makecodeEnabled, asciiEnabled,
 async function processAnimation(e, t) {
 	indexedOutputPalette = null;
 	await selectTemporaryPaletteFromAnimation(animSource, e, t);
+	lockPrimaryPaletteForProcess();
 	const a = animSource,
 		n = await a.open();
 	if (!n) throw new Error("Unable to open animation frame stream.");
@@ -2382,13 +2456,26 @@ function downloadBlob(e, t) {
 					"#original-preview-zone img, #original-preview-zone video, #original-preview-zone canvas",
 				);
 				if (!e) return;
+				const enabledColors = countEnabledPaletteEntries();
+				if (enabledColors < 2) {
+					displayErrorPopup(
+						"Palette EnableColor",
+						`Only ${enabledColors} palette color(s) are enabled.`,
+						"Enable at least 2 colors before converting. Unchecked colors are excluded from processing but keep their palette index for MakeCode output.",
+					);
+					addToSessionLog(
+						"PALETTE",
+						`Conversion aborted: fewer than 2 enabled colors (${enabledColors}).`,
+					);
+					return;
+				}
 				fr.disabled = false;
 				isProcessing = true;
 				stopTextProcessingFlag = false;
 				((canvasName = `${fileStem()}.${sourceExtension}`),
 					(processedAnimation = null),
 					parseCurrentPalette());
-				temporaryPaletteIndices = null;
+				lockPrimaryPaletteForProcess();
 				indexedOutputPalette = null;
 				const t = parseInt(inputWidth.value) || 16,
 					a = parseInt(inputHeight.value) || 16;
@@ -2422,6 +2509,7 @@ function downloadBlob(e, t) {
 					(ctx.globalCompositeOperation = "source-over"));
 				const n = ctx.getImageData(0, 0, t, a);
 				selectTemporaryPaletteFromPixels(n.data);
+				lockPrimaryPaletteForProcess();
 				const i = new ImageData(t, a),
 					o = engineSelect.value,
 					r = parseInt(asciiWidthInput.value) || 80,
