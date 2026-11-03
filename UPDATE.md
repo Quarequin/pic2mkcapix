@@ -48,3 +48,14 @@ Seeking now waits for the new frame to be presented (`requestVideoFrameCallback`
 ---
 
 [Return](#index)
+
+## ES3 portable toolchain (2026-11-03)
+
+`script/es3.js` is produced with **Babel** (`@babel/preset-env`, `targets: { ie: "8" }`) instead of Closure-Compiler. Closure whitespace/advanced passes could break some standalone media codec / WebCodecs paths in `decoder.js` / `encoder.js`. See `script/readme.txt` for install and compile commands.
+
+Portable files:
+
+- `pack/.../portable/IM2MKCAS.htm` — modern `es.js`
+- `pack/.../portable/IM2MKCAB.htm` — Babel `es3.js`
+
+Palette panel: 16 recycled rows, EnableColor + moveSteps travel with each colour, MakeCode indices stay stable when colours are unchecked (no renumbering).

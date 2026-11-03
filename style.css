@@ -396,7 +396,16 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	width: auto;
 }
 .colorboard .colorpad .color-pair .color-index-label {
-	display: none;
+	display: inline-block !important;
+	margin: 0;
+	min-width: 1.75em;
+	font-size: 12px;
+	font-weight: bold;
+	color: var(--accent-color, #ffd76a);
+	vertical-align: middle;
+	flex: 0 0 auto;
+	visibility: visible !important;
+	opacity: 1 !important;
 }
 .colorboard .colorpad .color-pair .colortext {
 	margin: 0;
