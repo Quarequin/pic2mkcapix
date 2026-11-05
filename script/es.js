@@ -314,9 +314,9 @@ No trace details available.</textarea>
 				<button type="button" id="palette-next-btn" class="palette-slot-btn">Next</button>
 				<span id="palette-range-label">Colors 1–16</span>
 			</div>
-			<div class="colorpad" id="colorpad">
-				<!-- 16 fixed color rows are created once in script and recycled by page scroll. -->
-			</div>
+			<ol class="colorpad" id="colorpad" start="1">
+				<!-- 16 fixed color rows (li) are created once in script and recycled by page scroll. -->
+			</ol>
 		</div>
 	</div>
 	<div class="action-buttons">
@@ -4738,19 +4738,22 @@ function isPaletteEntryEnabled(entry) {
 let paletteSlotEls = [];
 
 function buildPaletteSlotElement() {
-	const pair = document.createElement("div");
+	const pair = document.createElement("li");
 	pair.className = "color-pair";
+	// Numbering: <ol start> + <li value> with display:list-item markers.
+	// Controls stay on one horizontal row (checkbox … Remove).
 	pair.innerHTML =
+		'<div class="color-controls">' +
 		'<label class="color-enable-label" title="EnableColor: use this color during processing">' +
 		'<input type="checkbox" class="color-enable" checked />' +
 		"</label>" +
-		'<span class="color-index-label">1.</span>' +
 		'<input type="color" value="#888888" />' +
 		'<input type="text" class="colortext" value="#888888" />' +
 		'<input type="number" class="color-move-steps" min="1" step="1" value="1" title="Move steps" />' +
 		'<button type="button" class="palette-slot-btn color-move-up" title="Move up">^</button>' +
 		'<button type="button" class="palette-slot-btn color-move-down" title="Move down">v</button>' +
-		'<button type="button" class="palette-slot-btn color-remove" title="Remove this color">Remove</button>';
+		'<button type="button" class="palette-slot-btn color-remove" title="Remove this color">Remove</button>' +
+		"</div>";
 	return pair;
 }
 
@@ -4780,12 +4783,11 @@ function setPaletteSlotPlaceholder(pair, on) {
 	const up = pair.querySelector(".color-move-up");
 	const down = pair.querySelector(".color-move-down");
 	const remove = pair.querySelector(".color-remove");
-	const label = pair.querySelector(".color-index-label");
 	if (on) {
 		pair.style.position = "absolute";
 		pair.style.left = "-999999px";
 		pair.style.top = "-999999px";
-		label.textContent = " ";
+		pair.removeAttribute("value");
 		enable.checked = false;
 		enable.disabled = true;
 		colorInput.disabled = true;
@@ -4818,16 +4820,12 @@ function fillPaletteSlot(pair, absoluteIndex, entry) {
 	const colorInput = pair.querySelector('input[type="color"]');
 	const textInput = pair.querySelector(".colortext");
 	const steps = pair.querySelector(".color-move-steps");
-	const label = pair.querySelector(".color-index-label");
 	const remove = pair.querySelector(".color-remove");
+	const displayNumber = absoluteIndex + 1;
 	pair.dataset.index = String(absoluteIndex);
-	if (label) {
-		label.textContent = `${absoluteIndex + 1}.`;
-		label.hidden = false;
-		label.removeAttribute("hidden");
-		label.style.display = "inline-block";
-		label.style.visibility = "visible";
-	}
+	// Native list numbering: <ol start> + <li value> (never "Color N" text).
+	pair.value = displayNumber;
+	pair.setAttribute("value", String(displayNumber));
 	enable.checked = enabled;
 	colorInput.value = hexRgbOnly(value);
 	textInput.value = value;
@@ -4844,6 +4842,12 @@ function renderPalettePage() {
 		palettePageStart,
 		palettePageStart + VISIBLE_PALETTE_SLOTS,
 	);
+	// Page window numbering for the recycled <ol> (same range rules as before).
+	const listStart = palettePageStart + 1;
+	if (colorpad) {
+		colorpad.start = listStart;
+		colorpad.setAttribute("start", String(listStart));
+	}
 	for (let offset = 0; offset < VISIBLE_PALETTE_SLOTS; offset += 1) {
 		const pair = paletteSlotEls[offset];
 		if (offset < visibleValues.length) {
@@ -4852,6 +4856,7 @@ function renderPalettePage() {
 		} else {
 			setPaletteSlotPlaceholder(pair, true);
 			pair.dataset.index = "";
+			pair.removeAttribute("value");
 		}
 	}
 	updatePaletteCountLabel();
