@@ -1,4 +1,4 @@
-/* style.css — Optimized with display: block/table/none as primary */
+/* style.css — display: block / inline / float / list-item / none only. No table/flex/grid. */
 *, *::before, *::after { box-sizing: border-box; }
 
 @font-face {
@@ -108,7 +108,7 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 
 .loader-content {
 	text-align: center;
-	display: table-cell;
+	display: block;
 }
 
 .loader-progress {
@@ -330,6 +330,9 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 .colorboard .colorpad {
 	display: block;
 	margin-top: 10px;
+	padding: 0 0 0 0.25em;
+	list-style-type: decimal;
+	list-style-position: inside;
 }
 
 .colorboard .colorpad::after {
@@ -338,41 +341,55 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 	clear: both;
 }
 
-.colorboard .colorpad .color-pair {
-	display: table;
-	border-spacing: 4px 0;
+/*
+ * Palette cells: list-item markers for N. + float columns by viewport width.
+ * display limited to block / inline / float / list-item / none.
+ */
+.colorboard .colorpad > .color-pair {
+	display: list-item;
+	float: left;
 	width: 100%;
 	margin: 3px 0;
-	background: var(--panel-bg);
 	padding: 6px 8px;
+	background: var(--panel-bg);
 	border: 1px solid var(--border-color);
 	box-sizing: border-box;
+	list-style-type: decimal-leading-zero;
+	list-style-position: inside;
 }
+
+.colorboard .colorpad > .color-pair::marker {
+	color: var(--accent-color, #7aa2f7);
+	font-weight: bold;
+	font-size: 12px;
+}
+
 .colorboard .colorpad .color-pair.is-disabled {
 	border-style: dashed;
 	opacity: 0.85;
 }
 .colorboard .colorpad .color-pair.is-placeholder {
-	/* Off-screen recycled empty rows */
+	list-style-type: none;
+	visibility: hidden;
+	height: 0;
+	margin: 0;
+	padding: 0;
+	border: none;
+	overflow: hidden;
 }
-.colorboard .colorpad .color-core-controls,
-.colorboard .colorpad .color-action-controls {
-	display: table-cell;
+
+/* One control row: all widgets inline */
+.colorboard .colorpad .color-controls {
+	display: inline;
+	white-space: pre-wrap;
 	vertical-align: middle;
-	white-space: nowrap;
-}
-.colorboard .colorpad .color-core-controls {
-	width: 1%;
-}
-.colorboard .colorpad .color-action-controls {
-	text-align: right;
 }
 .colorboard .colorpad .color-pair input[type="color"] {
-	display: table-cell;
+	display: inline;
 	padding: 0;
 	width: 1.6em;
 	height: 1.6em;
-	margin: 0;
+	margin: 0 3px 0 0;
 	border-style: solid;
 	vertical-align: middle;
 }
@@ -383,52 +400,55 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 .colorboard .colorpad .color-pair .color-move-up,
 .colorboard .colorpad .color-pair .color-move-down,
 .colorboard .colorpad .color-pair .color-remove {
-	display: table-cell;
+	display: inline;
 	vertical-align: middle;
 }
+.colorboard .colorpad .color-pair label,
 .colorboard .colorpad .color-pair .color-enable-label {
-	margin: 0;
+	display: inline;
+	margin: 0 2px 0 0;
+	padding: 0;
 	width: auto;
+	max-width: 1.25em;
 	font-size: 11px;
+	line-height: 1;
+	vertical-align: middle;
 }
 .colorboard .colorpad .color-pair .color-enable {
+	display: inline;
 	margin: 0;
+	padding: 0;
 	width: auto;
-}
-.colorboard .colorpad .color-pair .color-index-label {
-	display: inline-block !important;
-	margin: 0;
-	min-width: 1.75em;
-	font-size: 12px;
-	font-weight: bold;
-	color: var(--accent-color, #ffd76a);
 	vertical-align: middle;
-	flex: 0 0 auto;
-	visibility: visible !important;
-	opacity: 1 !important;
 }
 .colorboard .colorpad .color-pair .colortext {
-	margin: 0;
-	width: 7.5em;
-	min-width: 5em;
+	display: inline;
+	margin: 0 3px 0 0;
+	width: 5.75em;
 	font-size: 11px;
 	padding: 2px;
 	font-family: var(--main-mono-font);
 }
 .colorboard .colorpad .color-pair .color-move-steps {
-	margin: 0;
-	width: 3.2em;
+	display: inline;
+	margin: 0 3px 0 0;
+	width: 2.8em;
 	font-size: 11px;
 	padding: 2px;
 }
 .colorboard .colorpad .color-pair .color-move-up,
 .colorboard .colorpad .color-pair .color-move-down {
-	min-width: 1.8em;
-	padding: 2px 6px;
+	display: inline;
+	min-width: 1.6em;
+	margin: 0 3px 0 0;
+	padding: 2px 5px;
 }
 .colorboard .colorpad .color-pair .color-remove {
-	padding: 2px 8px;
+	display: inline;
+	margin: 0;
+	padding: 2px 6px;
 }
+
 option.hidden { display: none; }
 
 label { display: block; margin: 10px 0; }
@@ -464,7 +484,7 @@ div.tab-panel textarea {
 	background-color: var(--status-bg);
 	color: var(--status-text);
 	padding: 5px;
-	display: table-cell;
+	display: block;
 	font-weight: bold;
 	position: sticky;
 	top: 10px;
@@ -569,7 +589,7 @@ div.output video,
 	margin-bottom: 8px;
 	border: 1px solid var(--border-color);
 	font-family: var(--main-mono-font);
-	display: table-cell;
+	display: block;
 }
 
 div.output {
@@ -646,12 +666,14 @@ input[type="file"] {
 }
 
 .popup-error-card {
-	display: table-cell;
+	display: block;
 	text-align: left;
 	background: var(--panel-bg);
 	color: var(--accent-color);
 	border: 1px solid var(--border-color);
 	width: 90%;
+	margin-left: auto;
+	margin-right: auto;
 	max-width: 550px;
 	box-shadow: 0 10px 30px rgba(0,0,0,0.7);
 	font-family: var(--main-mono-font);
@@ -676,12 +698,12 @@ input[type="file"] {
 .popup-header span {
 	float: left;
 	line-height: 24px;
-	display: table-cell;
+	display: block;
 }
 
 .popup-header .popup-close-btn {
 	float: right;
-	display: table-cell;
+	display: block;
 }
 
 .popup-body {
@@ -754,12 +776,12 @@ input[type="file"] {
 .palette-header-row > span {
 	float: left;
 	line-height: 28px;
-	display: table-cell;
+	display: block;
 }
 
 .palette-action-btns {
 	float: right;
-	display: table-cell;
+	display: block;
 }
 
 .palette-slot-btn {
@@ -852,7 +874,7 @@ input[type="file"] {
 
 #ascii-width-input {
 	width: 80px;
-	display: table-cell;
+	display: inline;
 }
 
 /* ==========================================================================
@@ -868,12 +890,18 @@ input[type="file"] {
 	}
 }
 
-@media (max-width: 1550px) {
-	.colorboard .colorpad .color-pair { width: 100%; margin: 3px 0; }
+@media (min-width: 701px) {
+	.colorboard .colorpad .color-pair {
+		width: 48.574%;
+		margin: 0.574%;
+	}
 }
 
-@media (max-width: 1200px) {
-	.colorboard .colorpad .color-pair { width: 100%; margin: 3px 0; }
+@media (min-width: 880px) and (max-width: 1350px) {
+	.colorboard .colorpad .color-pair {
+		width: 100%;
+		margin: 0.5% 0;
+	}
 }
 
 @media (max-width: 880px) {
@@ -909,11 +937,6 @@ input[type="file"] {
 		margin-bottom: 25px;
 		display: block;
 	}
-	.colorboard .colorpad .color-pair {
-		width: 100%;
-		margin: 3px 0;
-		display: table;
-	}
 	.preview-box {
 		float: none;
 		width: 100%;
@@ -923,20 +946,11 @@ input[type="file"] {
 	}
 }
 
-.colorboard .colorpad .color-core-controls,
-.colorboard .colorpad .color-action-controls {
-	display: table-row;
-	width: auto;
-	text-align: left;
-}
-.colorboard .colorpad .color-action-controls {
-	margin-top: 4px;
-}
 @media (max-width: 700px) {
 	.colorboard .colorpad .color-pair {
 		width: 100%;
 		margin: 3px 0;
-		display: table;
+		display: list-item;
 	}
 	.action-buttons button {
 		width: 100%;
@@ -956,7 +970,7 @@ input[type="file"] {
 	.colorboard .colorpad .color-pair {
 		width: 100%;
 		margin: 3px 0;
-		display: table;
+		display: list-item;
 	}
 	.size-settings-grid label:not(.full-row) { width: 48%; }
 	.size-settings-grid input[type="number"] { width: 48%; }
@@ -968,7 +982,7 @@ input[type="file"] {
 		width: 100%;
 		margin: 6px 0;
 		float: none;
-		display: table;
+		display: list-item;
 	}
 	.size-settings-grid { clear: both; }
 	.size-settings-grid label:not(.full-row) {
@@ -1002,8 +1016,9 @@ input[type="file"] {
 .palette-range-controls input,
 .palette-range-controls button,
 .palette-range-controls span {
-	display: table-cell;
+	display: inline;
 	margin: 2px 4px 2px 0;
+	vertical-align: middle;
 }
 .palette-range-controls input {
 	width: 90px;
@@ -1021,9 +1036,7 @@ input[type="file"] {
 
 /* Custom (2^n)×(2^n) tiled — range slider (avoids number-input page scroll traps) */
 .tile-power-slider-row {
-	display: table;
-	align-items: center;
-	gap: 8px;
+	display: block;
 	margin: 6px 0 4px;
 	max-width: 320px;
 }
@@ -1058,9 +1071,7 @@ input[type="file"] {
 	background: var(--panel-bg, #1f2335);
 }
 .viewer-controls .viewer-toggle {
-	display: table;
-	align-items: center;
-	gap: 8px;
+	display: block;
 	margin: 4px 0;
 	cursor: pointer;
 	user-select: none;
