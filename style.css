@@ -366,7 +366,7 @@ input[disabled] { pointer-events: none; cursor: not-allowed; }
 }
 
 .colorboard .colorpad .color-pair.is-disabled {
-	border-style: dashed;
+	border-left-style: dashed;
 	opacity: 0.85;
 }
 .colorboard .colorpad .color-pair.is-placeholder {
