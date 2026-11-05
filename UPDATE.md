@@ -1,9 +1,6 @@
-<h1 id="index">Update</h1>
+# Update
 
-- [Readme](README.md)
-- Update
-- [Humanize](HUMANIZE.md)
-- [Robotice](ROBOTICE.md)
+[Readme](README.md) Update [Humanize](HUMANIZE.md) [Robotice](ROBOTICE.md)
 
 ---
 
@@ -44,10 +41,6 @@ Root causes fixed: the MediaRecorder writer waited on a frame queue that was onl
 ## Audio/video sync fixes
 
 Seeking now waits for the new frame to be presented (`requestVideoFrameCallback`) and samples the middle of each frame slot on the same grid as the output timeline, so frames are never one step late. WebCodecs timestamps accumulate exactly (no per-frame rounding drift). The MediaRecorder fallback plays audio through a scheduled `AudioBufferSourceNode` and anchors the frame timeline to that start instant instead of measuring time after `play()` returned.
-
----
-
-[Return](#index)
 
 ## ES3 portable toolchain (2026-11-03)
 

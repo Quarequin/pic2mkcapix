@@ -1,9 +1,6 @@
-<h1 id="index">Humanized / Readable rewrite notes</h1>
+# Humanized / Readable rewrite notes
 
-- [Readme](README.md)
-- [Update](UPDATE.md)
-- Humanize
-- [Robotice](ROBOTICE.md)
+[Readme](README.md) [Update](UPDATE.md) Humanize [Robotice](ROBOTICE.md)
 
 ---
 
@@ -38,7 +35,3 @@ This package contains a cleaned version of `es.js` from pic2mkcapix.
 ## How to use
 
 Open `index.htm` (modular) or `pack/PIC2MKCA/portable/IM2MKCAS.htm` (standalone) `pack/PIC2MKCA/portable/IM2MKCAC.htm` (standalone + babel-es3).
-
----
-
-[Return](#index)

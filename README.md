@@ -18,8 +18,4 @@ visit at [page](https://quarequin.github.io/pic2mkcapix)
 
 ---
 
-## Navigation
-
-- [Update](UPDATE.md)
-- [Humanize](HUMANIZE.md)
-- [Robotice](ROBOTICE.md)
+[Update](UPDATE.md) [Humanize](HUMANIZE.md) [Robotice](ROBOTICE.md)

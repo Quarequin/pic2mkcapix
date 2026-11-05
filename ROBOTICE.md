@@ -1,9 +1,6 @@
-<h1 id="index">AI MARKDOWN AREA</h1>
+# AI MARKDOWN AREA
 
-- [Readme](README.md)
-- [Update](UPDATE.md)
-- [Humanize](HUMANIZE.md)
-- Robotice
+[Readme](README.md) [Update](UPDATE.md) [Humanize](HUMANIZE.md) Robotice
 
 ---
 
@@ -66,7 +63,3 @@ After static or animated conversion completes, `Download Text` is explicitly syn
 ## Note (2026-11-02)
 
 The WebGL / GPU processing path (`script/engine/matrix/gpu.js` and the `webgl` engine option) has been removed. Processing engines are now `script` (CPU JavaScript) and `wasm` only. Historical notes above that mention GPU tiled paths are retained for changelog context only.
-
----
-
-[Return](#index)
